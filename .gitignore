@@ -1,0 +1,6 @@
+Elisa
+*.bak
+*.exe
+*config.json
+resources.syso
+mysqlbackup

@@ -1,0 +1,29 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Status",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "${workspaceFolder}",
+			"args": [
+				"--status",
+				"-config",
+				"${workspaceFolder}/mysqlbackup_config.json"
+			]
+		},
+		{
+			"name": "Backup",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "${workspaceFolder}",
+			"args": [
+				"--backup",
+				"-config",
+				"${workspaceFolder}/mysqlbackup_config.json"
+			]
+		}
+	]
+}

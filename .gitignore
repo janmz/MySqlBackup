@@ -1,3 +1,6 @@
+# Subdir für Synology-Config
+Elisa/*
+
 # Binaries
 *.exe
 *.exe~
@@ -20,6 +23,7 @@ config.json
 *.log
 _debug*
 sconfig.debug.txt
+last_id.txt
 resources.syso
 
 # IDE / editor
@@ -27,6 +31,9 @@ resources.syso
 *.swp
 *.swo
 *~
+
+# Projekt-spezifisch: nicht nach GitHub
+Elisa/
 
 # OS
 .DS_Store

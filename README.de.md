@@ -17,7 +17,7 @@ Go-Programm zum Sichern aller MySQL/MariaDB-Datenbanken mit konfigurierbarer Auf
 
 ## Konfiguration
 
-Kopiere `mysqlbackup_config.example.json` nach `mysqlbackup_config.json` und setze:
+Kopiere `config.example.json` nach `config.json` und setze:
 
 | Feld | Beschreibung |
 |------|--------------|
@@ -32,7 +32,7 @@ Kopiere `mysqlbackup_config.example.json` nach `mysqlbackup_config.json` und set
 | `remote_backup_dir`, `remote_ssh_*` | Optionales SFTP-Remote-Backup |
 | `start_time` | Tägliche Startzeit (HH:MM, Standard 22:00) für den Zeitplan |
 
-Die Config-Datei wird gesucht in: `-config`-Pfad, dann aktuellem Verzeichnis (`mysqlbackup_config.json`), dann Benutzer-Home.
+Die Config-Datei wird gesucht in: `-config`-Pfad, dann aktuellem Verzeichnis (`config.json`), dann Benutzer-Home.
 
 ## Aufruf
 

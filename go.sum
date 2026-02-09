@@ -3,8 +3,12 @@ github.com/BurntSushi/toml v1.5.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/janmz/sconfig v1.2.8 h1:vsOHT2c9sC+J3iBFuEB4kT7fgMrzsE3lGN8LPDjWp0s=
-github.com/janmz/sconfig v1.2.8/go.mod h1:J8C2Ha5tHHgHm2FLAzPRekG0M6B5DDTj5OhnWCgXxE4=
+github.com/janmz/sconfig v1.2.9 h1:Yb9vKTm87FVogBW9JyTfe29vfTzRMBCRT08DiCFyHic=
+github.com/janmz/sconfig v1.2.9/go.mod h1:J8C2Ha5tHHgHm2FLAzPRekG0M6B5DDTj5OhnWCgXxE4=
+github.com/janmz/sconfig v1.2.10 h1:+3nMYZyPww2w/vY50xAI9LahX4Kdvjw6ov3mvhlyp84=
+github.com/janmz/sconfig v1.2.10/go.mod h1:J8C2Ha5tHHgHm2FLAzPRekG0M6B5DDTj5OhnWCgXxE4=
+github.com/janmz/sconfig v1.2.11 h1:gaR2YzJS2K8tkgmhmX0JXhCTQMoHHQNTTMz/r0gfHTs=
+github.com/janmz/sconfig v1.2.11/go.mod h1:J8C2Ha5tHHgHm2FLAzPRekG0M6B5DDTj5OhnWCgXxE4=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
 github.com/nicksnyder/go-i18n/v2 v2.6.0 h1:C/m2NNWNiTB6SK4Ao8df5EWm3JETSTIGNXBpMJTxzxQ=

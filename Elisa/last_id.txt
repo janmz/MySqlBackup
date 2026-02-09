@@ -1,0 +1,3 @@
+[sconfig DEBUG]   Identifier 1: 00:11:32:ca:c5:2f
+[sconfig DEBUG]   Identifier 2: 123456789
+

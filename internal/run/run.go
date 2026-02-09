@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/janmz/mysqlbackup/internal/config"
 	"github.com/janmz/mysqlbackup/internal/disk"
 	"github.com/janmz/mysqlbackup/internal/email"
+	"github.com/janmz/mysqlbackup/internal/i18n"
 	"github.com/janmz/mysqlbackup/internal/logger"
 	"github.com/janmz/mysqlbackup/internal/mysql"
 	"github.com/janmz/mysqlbackup/internal/remote"
@@ -27,10 +29,10 @@ func Backup(cfg *config.Config, log *logger.Logger) error {
 	backupDir := filepath.FromSlash(cfg.BackupDir)
 	avail, err := disk.Available(backupDir)
 	if err != nil {
-		log.Warn("disk available check: %v", err)
+		log.Warn(i18n.Tf("log.warn.disk_check", err))
 	} else if avail < disk.MinFreeBytes {
-		err := fmt.Errorf("insufficient disk space: %d bytes available, need at least %d", avail, disk.MinFreeBytes)
-		sendErrorEmail(cfg, log, "MySQL Backup: Speicherplatz zu gering", err.Error(), nil)
+		err := fmt.Errorf(i18n.T("err.disk_space"), avail, disk.MinFreeBytes)
+		sendErrorEmail(cfg, log, i18n.T("email.subject.disk"), err.Error(), nil)
 		return err
 	}
 
@@ -48,73 +50,74 @@ func Backup(cfg *config.Config, log *logger.Logger) error {
 			// Fallback: Wenn Port 3306 offen ist, läuft MySQL evtl. schon (z. B. mysql-CLI nicht im PATH).
 			// Dann nicht starten (Port schon belegt → Start würde fehlschlagen).
 			if portReachable(conn.Host, conn.Port) {
-				log.Info("MySQL-Port %s:%d offen, überspringe Start (mysql-CLI evtl. nicht im PATH?)", conn.Host, conn.Port)
+				log.Info(i18n.Tf("log.msg.mysql_port_skip", conn.Host, conn.Port))
 			} else {
-				log.Info("MySQL nicht erreichbar, starte mit: %s", cfg.MySQLStartCmd)
-				if err := runMySQLLifecycleCmd(cfg.MySQLStartCmd, log); err != nil {
-					sendErrorEmail(cfg, log, "MySQL Backup: MySQL-Start fehlgeschlagen", err.Error(), nil)
-					return fmt.Errorf("mysql start: %w", err)
+				log.Info(i18n.Tf("log.msg.mysql_starting", cfg.MySQLStartCmd))
+				if err := runMySQLLifecycleCmd(cfg.MySQLStartCmd, log, false); err != nil {
+					sendErrorEmail(cfg, log, i18n.T("email.subject.mysql_start"), err.Error(), nil)
+					return fmt.Errorf(i18n.T("err.mysql_start"), err)
 				}
 				if !waitForMySQL(conn, 60*time.Second, 2*time.Second) {
-					sendErrorEmail(cfg, log, "MySQL Backup: MySQL nach Start nicht erreichbar", "Timeout beim Warten auf MySQL", nil)
-					return fmt.Errorf("mysql not reachable after start (timeout)")
+					sendErrorEmail(cfg, log, i18n.T("email.subject.mysql_timeout"), i18n.T("email.body.mysql_timeout"), nil)
+					return fmt.Errorf(i18n.T("err.mysql_timeout"))
 				}
 				weStartedMySQL = true
-				log.Info("MySQL wurde gestartet")
+				log.Info(i18n.T("log.msg.mysql_started"))
 			}
 		}
 	}
 
 	isMariaDB, err := conn.IsMariaDB()
 	if err != nil {
-		sendErrorEmail(cfg, log, "MySQL Backup: Server nicht erreichbar", err.Error(), nil)
-		return fmt.Errorf("mysql server: %w", err)
+		sendErrorEmail(cfg, log, i18n.T("email.subject.mysql_server"), err.Error(), nil)
+		return fmt.Errorf(i18n.T("err.mysql_server"), err)
 	}
 
 	dbs, err := conn.ListDatabases()
 	if err != nil {
-		sendErrorEmail(cfg, log, "MySQL Backup: Datenbanken auflisten fehlgeschlagen", err.Error(), nil)
-		return fmt.Errorf("list databases: %w", err)
+		sendErrorEmail(cfg, log, i18n.T("email.subject.list_dbs"), err.Error(), nil)
+		return fmt.Errorf(i18n.T("err.list_databases"), err)
 	}
 	if len(dbs) == 0 {
-		log.Info("no user databases to backup")
+		log.Info(i18n.T("log.msg.no_user_dbs"))
 		return nil
 	}
 
 	userSQL, err := conn.ExportUsers(isMariaDB)
 	if err != nil {
 		// Fallback for MySQL without mysqlpump: skip user export, only dump DBs
-		log.Warn("export users failed (mysqlpump/mysqldump --system=users): %v; continuing without user grants in dumps", err)
+		log.Warn(i18n.Tf("log.warn.export_users", err))
 		userSQL = []byte{}
 	}
 
-	createdFiles, err := backup.Run(cfg, conn, userSQL, dbs, isMariaDB, log)
+	_, err = backup.Run(cfg, conn, userSQL, dbs, isMariaDB, log)
 	if err != nil {
-		sendErrorEmail(cfg, log, "MySQL Backup: Dump fehlgeschlagen", err.Error(), nil)
-		return fmt.Errorf("backup: %w", err)
+		sendErrorEmail(cfg, log, i18n.T("email.subject.dump"), err.Error(), nil)
+		return fmt.Errorf(i18n.T("err.backup"), err)
 	}
 
 	if err := retention.ApplyToDirs(cfg.BackupDir, cfg.RemoteBackupDir, cfg.RetainDaily, cfg.RetainWeekly, cfg.RetainMonthly, cfg.RetainYearly, log); err != nil {
-		log.Warn("retention: %v", err)
+		log.Warn(i18n.Tf("log.warn.retention", err))
 	}
 
-	if err := remote.Copy(cfg, createdFiles, log); err != nil {
-		sendErrorEmail(cfg, log, "MySQL Backup: Remote-Kopie fehlgeschlagen", err.Error(), nil)
-		return fmt.Errorf("remote copy: %w", err)
+	if err := remote.Sync(cfg, cfg.BackupDir, log); err != nil {
+		sendErrorEmail(cfg, log, i18n.T("email.subject.remote"), err.Error(), nil)
+		return fmt.Errorf(i18n.T("err.remote_sync"), err)
 	}
 
 	if weStartedMySQL && cfg.MySQLAutoStartStop && cfg.MySQLStopCmd != "" {
-		log.Info("Stoppe MySQL (war von uns gestartet): %s", cfg.MySQLStopCmd)
-		if err := runMySQLLifecycleCmd(cfg.MySQLStopCmd, log); err != nil {
-			log.Warn("MySQL-Stop: %v", err)
+		log.Info(i18n.Tf("log.msg.mysql_stopping", cfg.MySQLStopCmd))
+		if err := runMySQLLifecycleCmd(cfg.MySQLStopCmd, log, true); err != nil {
+			log.Warn(i18n.Tf("log.warn.mysql_stop", err))
 		}
 	}
 
 	return nil
 }
 
-// runMySQLLifecycleCmd runs a start/stop command. On Windows, .bat/.cmd are run via cmd /c.
-func runMySQLLifecycleCmd(cmd string, log *logger.Logger) error {
+// runMySQLLifecycleCmd runs a start or stop command. On Windows, .bat/.cmd are run via cmd /c.
+// waitForExit: true for stop (wait for process to finish, with timeout); false for start (daemon runs in foreground and never exits — start in background and return immediately).
+func runMySQLLifecycleCmd(cmd string, log *logger.Logger, waitForExit bool) error {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return nil
@@ -142,11 +145,29 @@ func runMySQLLifecycleCmd(cmd string, log *logger.Logger) error {
 		name = parts[0]
 		args = parts[1:]
 	}
-	// Timeout, falls Batch hängt (z. B. wartet auf Eingabe)
+
+	// Start command: daemon (e.g. mysqld --standalone) never exits — start in background and return.
+	if !waitForExit {
+		c := exec.Command(name, args...)
+		c.Stdin = nil
+		if devNull, err := os.Open(os.DevNull); err == nil {
+			c.Stdout = devNull
+			c.Stderr = devNull
+			defer devNull.Close()
+		}
+		if err := c.Start(); err != nil {
+			return fmt.Errorf(i18n.T("err.start_cmd"), err)
+		}
+		// Don't Wait(); daemon keeps running. Release the process so it can outlive us.
+		_ = c.Process.Release()
+		log.Info(i18n.T("log.msg.mysql_start_background"))
+		return nil
+	}
+
+	// Stop command: wait for process to finish with timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	c := exec.CommandContext(ctx, name, args...)
-	// Stdin von NUL/DevNull, damit XAMPP-Batch ("Drücken Sie eine beliebige Taste") nicht blockiert
 	if f, err := os.Open(os.DevNull); err == nil {
 		c.Stdin = f
 		defer f.Close()
@@ -156,16 +177,16 @@ func runMySQLLifecycleCmd(cmd string, log *logger.Logger) error {
 	out, err := c.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("timeout (Batch hängt?): %w (output: %s)", err, string(out))
+			return fmt.Errorf(i18n.T("err.timeout_batch"), err, string(out))
 		}
 		msg := string(out)
 		if strings.Contains(strings.ToLower(msg), "could not be started") || strings.Contains(msg, "konnte nicht gestartet") {
 			msg += "\nHinweis: XAMPP/MySQL-Logs prüfen (z. B. mysql\\data\\*.err), Port 3306, my.ini."
 		}
-		return fmt.Errorf("%w (output: %s)", err, msg)
+		return fmt.Errorf("%w (output: %s)", err, msg) // msg already from command output
 	}
 	if len(out) > 0 {
-		log.Info("mysql lifecycle: %s", string(out))
+		log.Info(i18n.Tf("log.msg.mysql_lifecycle", string(out)))
 	}
 	return nil
 }
@@ -208,7 +229,7 @@ func waitForMySQL(conn *mysql.Conn, timeout, interval time.Duration) bool {
 
 // portReachable returns true if host:port accepts a TCP connection (z. B. MySQL läuft, aber mysql-CLI fehlt im PATH).
 func portReachable(host string, port int) bool {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		return false
@@ -227,7 +248,7 @@ func sendErrorEmail(cfg *config.Config, log *logger.Logger, subject, errDetail s
 	}
 	body := email.FormatErrorBody(subject, errDetail, excerpt)
 	if err := email.Send(cfg, subject, body); err != nil {
-		log.Warn("sending error email: %v", err)
+		log.Warn(i18n.Tf("log.warn.email", err))
 	}
 }
 

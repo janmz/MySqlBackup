@@ -17,7 +17,7 @@ Go program for backing up all MySQL/MariaDB databases with configurable retentio
 
 ## Configuration
 
-Copy `mysqlbackup_config.example.json` to `mysqlbackup_config.json` and set:
+Copy `config.example.json` to `config.json` and set:
 
 | Field | Description |
 |-------|-------------|
@@ -32,7 +32,7 @@ Copy `mysqlbackup_config.example.json` to `mysqlbackup_config.json` and set:
 | `remote_backup_dir`, `remote_ssh_*` | Optional SFTP remote backup |
 | `start_time` | Daily run time (HH:MM, default 22:00) for schedule |
 
-Config file is looked up in: `-config` path, then current directory (`mysqlbackup_config.json`), then user home.
+Config file is looked up in: `-config` path, then current directory (`config.json`), then user home.
 
 ## Usage
 

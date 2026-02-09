@@ -8,35 +8,27 @@ import (
 	"regexp"
 	"sort"
 	"time"
+
+	"github.com/janmz/mysqlbackup/internal/i18n"
 )
 
 const backupPrefix = "mysql_backup_"
 
 var dateInFilename = regexp.MustCompile(`mysql_backup_(\d{8})_`)
 
-// Period is daily, weekly, monthly, or yearly.
-type Period int
-
-const (
-	Daily Period = iota
-	Weekly
-	Monthly
-	Yearly
-)
-
-// Classify returns the single retention period for a date (yearly > monthly > weekly > daily).
-// Yearly = 31.12, Monthly = last day of month (not 31.12), Weekly = Sunday (not month-end), Daily = rest.
-func Classify(t time.Time) Period {
+// Classify returns the retention period for a date as a localized string (e.g. German "täglichen", "wöchentlichen").
+// Order: yearly (31.12) > monthly (last day of month, not 31.12) > weekly (Sunday) > daily (rest).
+func Classify(t time.Time) string {
 	if t.Month() == 12 && t.Day() == 31 {
-		return Yearly
+		return i18n.T("retention.yearly")
 	}
 	if isLastDayOfMonth(t) {
-		return Monthly
+		return i18n.T("retention.monthly")
 	}
 	if t.Weekday() == time.Sunday {
-		return Weekly
+		return i18n.T("retention.weekly")
 	}
-	return Daily
+	return i18n.T("retention.daily")
 }
 
 func isLastDayOfMonth(t time.Time) bool {
@@ -44,10 +36,12 @@ func isLastDayOfMonth(t time.Time) bool {
 	return next.Month() != t.Month()
 }
 
-// BackupFile holds path and parsed date for a backup zip.
+// BackupFile holds path, parsed date, file modification time and size for a backup zip.
 type BackupFile struct {
-	Path string
-	Date time.Time
+	Path    string
+	Date    time.Time
+	ModTime time.Time
+	Size    int64
 }
 
 // ListBackups returns all mysql_backup_*.zip in dir with parsed dates, sorted by date ascending.
@@ -73,18 +67,31 @@ func ListBackups(dir string) ([]BackupFile, error) {
 		if len(matches) < 2 {
 			continue
 		}
-		t, err := time.Parse("20060102", matches[1])
+		t, err := time.ParseInLocation("20060102", matches[1], time.Local)
 		if err != nil {
 			continue
 		}
-		files = append(files, BackupFile{Path: filepath.Join(dir, name), Date: t})
+		fullPath := filepath.Join(dir, name)
+		bf := BackupFile{Path: fullPath, Date: t}
+		if info, err := os.Stat(fullPath); err == nil {
+			bf.ModTime = info.ModTime()
+			bf.Size = info.Size()
+		}
+		files = append(files, bf)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Date.Before(files[j].Date) })
 	return files, nil
 }
 
-// Apply deletes excess backups so that retain_daily/weekly/monthly/yearly are kept.
-// Order: daily (keep last N), then weekly (keep last N), monthly, yearly.
+// dateKey returns YYYYMMDD for use as a map key (same timezone as t).
+func dateKey(t time.Time) string {
+	return t.Format("20060102")
+}
+
+// Apply deletes backups that fall outside the retention windows.
+// retain_daily 14 = keep all daily backups from the last 14 calendar days (by backup date).
+// retain_weekly 3 = keep all weekly backups from the last 3 Sundays; retain_monthly/yearly = last N month-ends / year-ends.
+// So we delete by date window, not by "last N files", so multiple DBs per day/week are all kept within the window.
 func Apply(dir string, retainDaily, retainWeekly, retainMonthly, retainYearly int, log interface {
 	Info(string, ...interface{})
 	Warn(string, ...interface{})
@@ -97,45 +104,63 @@ func Apply(dir string, retainDaily, retainWeekly, retainMonthly, retainYearly in
 		return nil
 	}
 
-	byPeriod := map[Period][]BackupFile{
-		Daily:   nil,
-		Weekly:  nil,
-		Monthly: nil,
-		Yearly:  nil,
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	// Cutoff: keep daily backups with date >= today - retainDaily
+	dailyCutoff := today.AddDate(0, 0, -retainDaily)
+
+	// Last N Sundays (set of dates to keep for weekly)
+	keepSundays := make(map[string]bool)
+	// Finde den letzten Sonntag (inklusive heute, falls heute Sonntag ist)
+	lastSunday := today
+	for lastSunday.Weekday() != time.Sunday {
+		lastSunday = lastSunday.AddDate(0, 0, -1)
 	}
-	for _, f := range files {
-		p := Classify(f.Date)
-		byPeriod[p] = append(byPeriod[p], f)
+	// Gehe jeweils 7 Tage nach vorne, retainWeekly-mal
+	for i := 0; i < retainWeekly; i++ {
+		sunday := lastSunday.AddDate(0, 0, 7*i)
+		keepSundays[dateKey(sunday)] = true
+		if sunday.Year() < 2000 {
+			break
+		}
 	}
 
-	// For each period, keep only the last retain_*; delete the rest.
-	for _, p := range []Period{Yearly, Monthly, Weekly, Daily} {
-		list := byPeriod[p]
-		if len(list) == 0 {
+	// Last N month-ends (not 31.12; those are yearly)
+	keepMonthEnds := make(map[string]bool)
+	// Gehe nur die Monate zurück und berechne das Monatsende jedes Monats.
+	for m, count := today, 0; count < retainMonthly; m = m.AddDate(0, -1, 0) {
+		// Monatsende berechnen: zum 1. des nächsten Monats springen, dann einen Tag zurück.
+		firstOfNextMonth := time.Date(m.Year(), m.Month(), 1, 0, 0, 0, 0, m.Location()).AddDate(0, 1, 0)
+		monthEnd := firstOfNextMonth.AddDate(0, 0, -1)
+		keepMonthEnds[dateKey(monthEnd)] = true
+		count++
+		if monthEnd.Year() < 2000 {
+			break
+		}
+	}
+
+	// Last N year-ends (31.12)
+	keepYearEnds := make(map[string]bool)
+	for y, count := today.Year(), 0; count < retainYearly && y >= 2000; y, count = y-1, count+1 {
+		lastDay := time.Date(y, 12, 31, 0, 0, 0, 0, today.Location())
+		keepYearEnds[dateKey(lastDay)] = true
+	}
+
+	for _, f := range files {
+		key := dateKey(f.Date)
+		keep := !f.Date.Before(dailyCutoff)
+		keep = keep || keepSundays[key]
+		keep = keep || keepMonthEnds[key]
+		keep = keep || keepYearEnds[key]
+		if keep {
 			continue
 		}
-		var toDelete int
-		switch p {
-		case Daily:
-			toDelete = len(list) - retainDaily
-		case Weekly:
-			toDelete = len(list) - retainWeekly
-		case Monthly:
-			toDelete = len(list) - retainMonthly
-		case Yearly:
-			toDelete = len(list) - retainYearly
-		}
-		if toDelete <= 0 {
+		if err := os.Remove(f.Path); err != nil {
+			log.Warn(i18n.Tf("log.warn.retention_delete", f.Path, err))
 			continue
 		}
-		// Delete oldest toDelete files in this period
-		for i := 0; i < toDelete && i < len(list); i++ {
-			if err := os.Remove(list[i].Path); err != nil {
-				log.Warn("retention delete %s: %v", list[i].Path, err)
-				continue
-			}
-			log.Info("deleted old backup %s", filepath.Base(list[i].Path))
-		}
+		log.Info(i18n.Tf("log.msg.deleted_old_backup", Classify(f.Date), filepath.Base(f.Path)))
 	}
 	return nil
 }
@@ -146,11 +171,11 @@ func ApplyToDirs(backupDir, remoteBackupDir string, retainDaily, retainWeekly, r
 	Warn(string, ...interface{})
 }) error {
 	if err := Apply(backupDir, retainDaily, retainWeekly, retainMonthly, retainYearly, log); err != nil {
-		return fmt.Errorf("retention local: %w", err)
+		return fmt.Errorf(i18n.T("err.retention_local"), err)
 	}
 	if remoteBackupDir != "" {
 		if err := Apply(remoteBackupDir, retainDaily, retainWeekly, retainMonthly, retainYearly, log); err != nil {
-			return fmt.Errorf("retention remote: %w", err)
+			return fmt.Errorf(i18n.T("err.retention_remote"), err)
 		}
 	}
 	return nil

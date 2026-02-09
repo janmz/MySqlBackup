@@ -3,7 +3,7 @@ module github.com/janmz/mysqlbackup
 go 1.23.0
 
 require (
-	github.com/janmz/sconfig v1.2.8
+	github.com/janmz/sconfig v1.2.11
 	golang.org/x/crypto v0.28.0
 )
 

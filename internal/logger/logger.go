@@ -11,9 +11,10 @@ import (
 
 // Logger writes lines to a file with optional stdout echo.
 type Logger struct {
-	f   *os.File
-	mu  sync.Mutex
-	echo bool
+	f       *os.File
+	mu      sync.Mutex
+	echo    bool
+	Verbose bool // when true, Debug() writes [DEBUG] lines
 }
 
 // New opens or creates the log file for appending. Creates parent dirs if needed.
@@ -47,6 +48,13 @@ func (l *Logger) Warn(format string, a ...interface{}) { l.write("WARN", format,
 
 // Error logs an error.
 func (l *Logger) Error(format string, a ...interface{}) { l.write("ERROR", format, a...) }
+
+// Debug logs a debug message only when Verbose is true (prefix [DEBUG]).
+func (l *Logger) Debug(format string, a ...interface{}) {
+	if l.Verbose {
+		l.write("DEBUG", format, a...)
+	}
+}
 
 // Close closes the log file.
 func (l *Logger) Close() error {

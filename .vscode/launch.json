@@ -10,7 +10,7 @@
 			"args": [
 				"--status",
 				"-config",
-				"${workspaceFolder}/mysqlbackup_config.json"
+				"${workspaceFolder}/config.json"
 			]
 		},
 		{
@@ -22,8 +22,22 @@
 			"args": [
 				"--backup",
 				"-config",
-				"${workspaceFolder}/mysqlbackup_config.json"
+				"${workspaceFolder}/config.json"
 			]
+		},
+		{
+			"name": "Getfile (mysql_backup_20260202_NOAH_myplan.zip)",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "${workspaceFolder}",
+			"args": [
+				"--getfile",
+				"mysql_backup_20260202_NOAH_myplan.zip",
+				"-config",
+				"${workspaceFolder}/config.json"
+			],
+			"cwd": "${workspaceFolder}"
 		}
 	]
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/janmz/mysqlbackup/internal/config"
+	"github.com/janmz/mysqlbackup/internal/i18n"
 )
 
 // Send sends an email to admin_email with the given subject and body (plain text).
@@ -35,9 +36,10 @@ func Send(cfg *config.Config, subject, body string) error {
 
 	tlsMode := strings.ToLower(strings.TrimSpace(cfg.AdminSMTPTLS))
 	if tlsMode == "" {
-		if port == 465 {
+		switch port {
+		case 465:
 			tlsMode = "tls"
-		} else if port == 587 {
+		case 587:
 			tlsMode = "starttls"
 		}
 	}
@@ -57,7 +59,7 @@ func sendTLS(cfg *config.Config, addr string, auth smtp.Auth, msg []byte) error 
 	tlsConfig := &tls.Config{ServerName: cfg.AdminSMTPServer}
 	conn, err := tls.Dial("tcp", addr, tlsConfig)
 	if err != nil {
-		return fmt.Errorf("tls dial: %w", err)
+		return fmt.Errorf(i18n.T("err.tls_dial"), err)
 	}
 	defer conn.Close()
 	client, err := smtp.NewClient(conn, cfg.AdminSMTPServer)
@@ -91,7 +93,7 @@ func sendTLS(cfg *config.Config, addr string, auth smtp.Auth, msg []byte) error 
 func sendSTARTTLS(cfg *config.Config, addr string, auth smtp.Auth, msg []byte) error {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return fmt.Errorf(i18n.T("err.dial"), err)
 	}
 	defer conn.Close()
 	client, err := smtp.NewClient(conn, cfg.AdminSMTPServer)
@@ -102,7 +104,7 @@ func sendSTARTTLS(cfg *config.Config, addr string, auth smtp.Auth, msg []byte) e
 	if ok, _ := client.Extension("STARTTLS"); ok {
 		tlsConfig := &tls.Config{ServerName: cfg.AdminSMTPServer}
 		if err := client.StartTLS(tlsConfig); err != nil {
-			return fmt.Errorf("starttls: %w", err)
+			return fmt.Errorf(i18n.T("err.starttls"), err)
 		}
 	}
 	if err := client.Auth(auth); err != nil {

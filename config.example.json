@@ -28,5 +28,7 @@
   "remote_ssh_password": "",
   "remote_ssh_secure_password": "",
   "remote_ssh_key_file": "",
+  "remote_aes_password": "",
+  "remote_aes_secure_password": "",
   "start_time": "22:00"
 }

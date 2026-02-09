@@ -1,6 +1,36 @@
-Elisa
-*.bak
+# Binaries
 *.exe
-*config.json
-resources.syso
+*.exe~
 mysqlbackup
+mysqlbackup.exe
+
+# Go build / test
+*.test
+*.out
+coverage.html
+vendor/
+
+# Local config (contains secrets – use config.example.json as template)
+config.json
+*config.json
+
+# Debug / temp
+*.bak
+*.tmp
+*.log
+_debug*
+sconfig.debug.txt
+resources.syso
+
+# IDE / editor
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Workspace (optional – remove if you want to track it)
+# *.code-workspace

@@ -23,7 +23,6 @@ type Conn struct {
 	BinDir   string // optional: Verzeichnis mit mysql, mysqldump, mysqlpump (leer = aus PATH)
 }
 
-
 // binPath returns the path to the given executable (mysql, mysqldump, mysqlpump). Wenn BinDir leer, nur Name (aus PATH); sonst voller Pfad.
 func (c *Conn) binPath(name string) string {
 	if strings.TrimSpace(c.BinDir) == "" {
@@ -209,6 +208,19 @@ func (c *Conn) DumpDatabase(db string, isMariaDB bool, dest io.Writer) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf(i18n.Tf("err.mysqldump_db", db), err, stderr.String())
+	}
+	return nil
+}
+
+// ImportSQL streams SQL input into mysql via stdin.
+func (c *Conn) ImportSQL(src io.Reader) error {
+	args := c.baseArgs()
+	cmd := exec.Command(c.binPath("mysql"), args...)
+	cmd.Stdin = src
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf(i18n.T("err.mysql_import"), err, stderr.String())
 	}
 	return nil
 }

@@ -4,6 +4,8 @@
   "mysql_hostname": "",
   "mysql_port": 3306,
   "mysql_bin": "",
+  "mysql_data_dir": "",
+  "mysql_backup_dir": "",
   "mysql_auto_start_stop": false,
   "mysql_start_cmd": "",
   "mysql_stop_cmd": "",

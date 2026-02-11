@@ -83,6 +83,46 @@ func ListBackups(dir string) ([]BackupFile, error) {
 	return files, nil
 }
 
+// LastBackupBefore returns all backup ZIPs from one backup day.
+// If beforeDate is nil, it returns all files from the latest day.
+// If beforeDate is set, it returns all files from the latest day strictly before beforeDate.
+func LastBackupBefore(dir string, beforeDate *time.Time) ([]BackupFile, error) {
+	files, err := ListBackups(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	var target time.Time
+	found := false
+	if beforeDate == nil {
+		target = files[len(files)-1].Date
+		found = true
+	} else {
+		for i := len(files) - 1; i >= 0; i-- {
+			if files[i].Date.Before(*beforeDate) {
+				target = files[i].Date
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+
+	key := dateKey(target)
+	var selected []BackupFile
+	for _, f := range files {
+		if dateKey(f.Date) == key {
+			selected = append(selected, f)
+		}
+	}
+	return selected, nil
+}
+
 // dateKey returns YYYYMMDD for use as a map key (same timezone as t).
 func dateKey(t time.Time) string {
 	return t.Format("20060102")

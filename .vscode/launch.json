@@ -38,6 +38,19 @@
 				"${workspaceFolder}/config.json"
 			],
 			"cwd": "${workspaceFolder}"
+		},
+		{
+			"name": "Datenbank voll wiederherstellen (restorefull)",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "${workspaceFolder}",
+			"args": [
+				"-restorefull",
+				"-config",
+				"${workspaceFolder}/config.json"
+			],
+			"cwd": "${workspaceFolder}"
 		}
 	]
 }

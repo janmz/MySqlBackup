@@ -1,18 +1,28 @@
 # MySQL/MariaDB Backup
 
-Go program for backing up all MySQL/MariaDB databases with configurable retention (daily/weekly/monthly/yearly), optional remote copy via SFTP, and error email notifications. Configured via [janmz/sconfig](https://github.com/janmz/sconfig) (JSON) with secure password handling.
+Go program for backing up all MySQL/MariaDB databases with configurable
+retention (daily/weekly/monthly/yearly), optional remote copy via SFTP, and
+error email notifications. Configured via [janmz/sconfig](https://github.com/janmz/sconfig)
+(JSON) with secure password handling.
 
 **Donationware for CFI Kinderhilfe.** License: MIT with attribution.
 
 ## Features
 
-- Backs up all user databases (excluding `information_schema`, `performance_schema`, `mysql`).
-- Exports users and grants (MariaDB: `mysqldump --system=users`, MySQL: `mysqlpump --users`), parses the output, and appends relevant CREATE USER/GRANT blocks to each database dump (root is not included).
-- One ZIP per database: `mysql_backup_<yyyymmdd>_<hostname>_<databasename>.zip` containing a single SQL file (dump + user block + `FLUSH PRIVILEGES`).
-- Retention: keep last N daily/weekly/monthly/yearly backups (weekly = Sunday, monthly = last day of month, yearly = 31 Dec).
+- Backs up all user databases (excluding `information_schema`,
+  `performance_schema`, `mysql`).
+- Exports users and grants (MariaDB: `mysqldump --system=users`,
+  MySQL: `mysqlpump --users`), parses the output, and appends relevant
+  CREATE USER/GRANT blocks to each database dump (root is not included).
+- One ZIP per database: `mysql_backup_<yyyymmdd>_<hostname>_<databasename>.zip`
+ containing a single SQL file (dump + user block + `FLUSH PRIVILEGES`).
+- Retention: keep last N daily/weekly/monthly/yearly backups (weekly = Sunday,
+  monthly = last day of month, yearly = 31 Dec).
 - Optional remote backup via SFTP.
-- Critical error notification by email (low disk space, MySQL unreachable, remote copy failure).
-- **Automatic schedule setup** on first run: Windows Task Scheduler or Linux systemd timer (no separate install step required).
+- Critical error notification by email (low disk space, MySQL unreachable,
+  remote copy failure).
+- **Automatic schedule setup** on first run: Windows Task Scheduler or Linux
+  systemd timer (no separate install step required).
 - Cross-platform: Windows and Linux (paths and scheduling adapt automatically).
 
 ## Configuration
@@ -20,10 +30,12 @@ Go program for backing up all MySQL/MariaDB databases with configurable retentio
 Copy `config.example.json` to `config.json` and set:
 
 | Field | Description |
-|-------|-------------|
+| ----- | ----------- |
 | `mysql_host`, `mysql_port` | MySQL/MariaDB server |
 | `mysql_bin` | Optional: directory containing mysql, mysqldump, mysqlpump (e.g. `D:\xampp\mysql\bin`) when not in PATH |
 | `mysql_auto_start_stop`, `mysql_start_cmd`, `mysql_stop_cmd` | Optional: If MySQL is not running (e.g. XAMPP), start before backup and stop after. Example: `mysql_start_cmd`: `C:\xampp\mysql_start.bat`, `mysql_stop_cmd`: `C:\xampp\mysql_stop.bat` |
+| `mysql_data_dir` | Data directory of the instance (required for `--restorefull`) |
+| `mysql_backup_dir` | Optional template backup directory of the instance for data initialization. If empty, sibling `backup` next to `mysql_data_dir` is used |
 | `root_password` / `root_secure_password` | Root password (sconfig encrypts into `root_secure_password`) |
 | `retain_daily`, `retain_weekly`, `retain_monthly`, `retain_yearly` | How many backups to keep per period |
 | `backup_dir` | Local backup directory |
@@ -32,7 +44,8 @@ Copy `config.example.json` to `config.json` and set:
 | `remote_backup_dir`, `remote_ssh_*` | Optional SFTP remote backup |
 | `start_time` | Daily run time (HH:MM, default 22:00) for schedule |
 
-Config file is looked up in: `-config` path, then current directory (`config.json`), then user home.
+Config file is looked up in: `-config` path, then current directory
+(`config.json`), then user home.
 
 ## Usage
 
@@ -46,6 +59,18 @@ mysqlbackup --status -config /path/to/config.json
 mysqlbackup --backup
 mysqlbackup --backup -config /path/to/config.json
 
+# Restore from latest backup day (all ZIPs of that date)
+mysqlbackup --restore
+
+# Restore from latest backup day before a date
+mysqlbackup --restore 20250210
+
+# Full restore (stop mysql, data -> data.old, copy instance backup -> data, then import)
+mysqlbackup --restorefull
+
+# Full restore from latest backup before a date
+mysqlbackup --restorefull 20250210
+
 # Create scheduled jobs (Windows Task Scheduler / Linux systemd timer)
 mysqlbackup --init
 
@@ -58,19 +83,36 @@ mysqlbackup --cleanconfig
 
 ## Restore
 
-Each ZIP contains one SQL file (e.g. `mydb.sql`). Restore with:
+Each ZIP contains one SQL file (e.g. `mydb.sql`).
+
+### Restore modes
+
+- `--restore`: imports from the latest backup day (or latest backup day before
+  optional trailing `YYYYMMDD`).
+
+- `--restorefull`: full reinit flow for MySQL/MariaDB instances that provide a
+  template `backup` directory:
+  - stop server if running
+  - rename `data` to `data.old`
+  - copy instance `backup` directory to `data`
+  - start server (root usually empty in template)
+  - import selected backup ZIPs
+
+Manual restore from a single ZIP:
 
 ```bash
 unzip mysql_backup_20250131_localhost_mydb.zip
 mysql -u root -p < mydb.sql
 ```
 
-The SQL includes the database dump and the users/grants that have privileges on that database (root is not included).
+The SQL includes the database dump and the users/grants that have privileges on
+that database (root is not included).
 
 ## Requirements
 
 - Go 1.21+
-- `mysql` and `mysqldump` (and for MySQL user export: `mysqlpump` or fallback without user passwords) in PATH
+- `mysql` and `mysqldump` (and for MySQL user export: `mysqlpump` or fallback
+  without user passwords) in PATH
 - Windows: Task Scheduler (schtasks). Linux: systemd (user or system).
 
 ## Build

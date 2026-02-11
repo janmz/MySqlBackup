@@ -17,7 +17,7 @@ func TestClassify(t *testing.T) {
 		{time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC), "retention.yearly"},
 		{time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC), "retention.monthly"},
 		{time.Date(2025, 2, 28, 0, 0, 0, 0, time.UTC), "retention.monthly"},
-		{time.Date(2025, 2, 2, 0, 0, 0, 0, time.UTC), "retention.weekly"},  // Sunday
+		{time.Date(2025, 2, 2, 0, 0, 0, 0, time.UTC), "retention.weekly"}, // Sunday
 		{time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC), "retention.daily"}, // Wednesday
 	}
 	for _, tt := range tests {
@@ -70,6 +70,76 @@ func TestApplyRetentionByDateWindow(t *testing.T) {
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Errorf("retention deleted 3-day-old backup (retain_daily=14); should keep backups from last 14 days")
+	}
+}
+
+func TestLastBackupBeforeLatestDay(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"mysql_backup_20250101_host_db1.zip",
+		"mysql_backup_20250102_host_db1.zip",
+		"mysql_backup_20250102_host_db2.zip",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, err := LastBackupBefore(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("LastBackupBefore latest: got %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if got := f.Date.Format("20060102"); got != "20250102" {
+			t.Fatalf("LastBackupBefore latest date: got %s, want 20250102", got)
+		}
+	}
+}
+
+func TestLastBackupBeforeWithDate(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"mysql_backup_20250101_host_db1.zip",
+		"mysql_backup_20250103_host_db1.zip",
+		"mysql_backup_20250103_host_db2.zip",
+		"mysql_backup_20250105_host_db1.zip",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	before := time.Date(2025, 1, 5, 0, 0, 0, 0, time.Local)
+	files, err := LastBackupBefore(dir, &before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("LastBackupBefore beforeDate: got %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if got := f.Date.Format("20060102"); got != "20250103" {
+			t.Fatalf("LastBackupBefore beforeDate: got %s, want 20250103", got)
+		}
+	}
+}
+
+func TestLastBackupBeforeNoMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mysql_backup_20250110_host_db1.zip"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Date(2025, 1, 1, 0, 0, 0, 0, time.Local)
+	files, err := LastBackupBefore(dir, &before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("LastBackupBefore no match: got %d files, want 0", len(files))
 	}
 }
 

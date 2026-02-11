@@ -1,0 +1,20 @@
+---
+description: Alle Markdown- und .mdc-Dateien müssen markdownlint-konform sein
+globs: "**/*.md,**/*.mdc"
+alwaysApply: true
+---
+
+# Markdown und markdownlint
+
+- **Alle .md- und .mdc-Dateien** (README, Changelog, Cursor-Regeln in
+  `.cursor/rules/*.mdc`, sonstige Dokumentation) müssen so angelegt und
+  bearbeitet werden, dass die **markdownlint-Regeln** des Projekts eingehalten
+  werden.
+- Konfiguration: **`.markdownlint.json`** (und ggf. `.vscode/settings.json`).
+- Vor dem Abschluss von Änderungen an Markdown oder .mdc:
+  - Linter prüfen (IDE oder
+    `npx markdownlint-cli "**/*.md" "**/*.mdc"`).
+  - Verstöße beheben: Zeilenlänge (Prosa max. 80 Zeichen), Tabellenformat
+    (MD060: Leerzeichen um `|`), keine bare URLs, Code-Blöcke mit Leerzeilen.
+- Prosa bei 80 Zeichen umbrechen; Tabellen und Code-Blöcke sind von MD013
+  ausgenommen (siehe Config). Neue oder geänderte Abschnitte konform halten.

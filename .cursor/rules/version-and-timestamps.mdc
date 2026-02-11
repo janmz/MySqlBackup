@@ -1,0 +1,19 @@
+---
+description: Version, BuildTime und Zeitstempel korrekt setzen – keine Platzhalter
+alwaysApply: true
+---
+
+# Version und Zeitstempel
+
+## BuildTime / Last modified
+
+- **BuildTime** (z. B. in `version.go`) und alle **„Last modified“-** oder Erstell-/Änderungszeit-Angaben dürfen **niemals** auf Platzhalter wie `00:00:00` oder feste Mitternacht-Zeiten gesetzt werden.
+- Beim Erhöhen der Build-Nummer oder beim Anpassen von Versionsdateien:
+  - **BuildTime**: Entweder unverändert lassen (wird oft per `-ldflags` beim Build gesetzt) oder mit **aktuellem Datum und aktueller Uhrzeit** setzen (z. B. `time.Now().Format("2006-01-02 15:04:05")` beim Build, oder manuell: tatsächlicher Zeitpunkt wie `2026-02-10 14:35:22`).
+  - **„Last modified“ / ähnliche Felder**: Immer **aktuelles Datum und aktuelle Uhrzeit** verwenden, nicht `00:00:00`.
+- Wenn du die genaue Uhrzeit nicht kennst: Einen realistischen Zeitpunkt am aktuellen Tag verwenden (z. B. aktuelle Stunde/Minute schätzen oder z. B. `12:00:00` nur als Notfall, nie `00:00:00` als Standard).
+
+## Kurz
+
+- ❌ `BuildTime = "2026-02-10 00:00:00"`
+- ✅ BuildTime unverändert lassen oder echten Build-Zeitpunkt setzen (z. B. `2026-02-10 14:35:22` oder per ldflags).

@@ -5,9 +5,10 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.1.5.62 (in version.go zu ändern)
+// Version: 1.2.0.65 (in version.go zu ändern)
 //
 // ChangeLog:
+// 11.02.26	1.2.0	Feature: included an way to fully restore a database
 // 09.02.26	1.1.5	Fixed: Quotes for task scheduler arguments corrected
 // 09.02.26	1.1.4	Fixed structure to comply with prepreaBuild
 //
@@ -19,11 +20,14 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/janmz/mysqlbackup/internal/config"
 	"github.com/janmz/mysqlbackup/internal/i18n"
 	"github.com/janmz/mysqlbackup/internal/logger"
+	"github.com/janmz/mysqlbackup/internal/mysql"
 	"github.com/janmz/mysqlbackup/internal/remote"
+	"github.com/janmz/mysqlbackup/internal/restore"
 	"github.com/janmz/mysqlbackup/internal/retention"
 	"github.com/janmz/mysqlbackup/internal/run"
 	"github.com/janmz/mysqlbackup/internal/schedule"
@@ -40,6 +44,8 @@ func main() {
 	doRemove := flag.Bool("remove", false, "Jobs löschen")
 	doStatus := flag.Bool("status", false, "Config prüfen, Backupdateien und Job-Einstellung anzeigen")
 	doBackup := flag.Bool("backup", false, "Backup ausführen (wird von Jobs übergeben)")
+	doRestore := flag.Bool("restore", false, "Restore aus letztem Backup oder letztem vor optionalem Datum YYYYMMDD")
+	doRestoreFull := flag.Bool("restorefull", false, "Full-Restore: data->data.old, Instanz-backup nach data, dann Import (optional YYYYMMDD)")
 	getFile := flag.String("getfile", "", "Datei von Remote laden (ZIP-Backup-Dateiname)")
 	flag.Usage = printUsage
 	flag.Parse()
@@ -73,8 +79,31 @@ func main() {
 	if *doBackup {
 		n++
 	}
+	if *doRestore {
+		n++
+	}
+	if *doRestoreFull {
+		n++
+	}
 	if *getFile != "" {
 		n++
+	}
+	args := flag.Args()
+	if len(args) > 1 {
+		printStartupHeader(path)
+		printUsage()
+		fmt.Fprintln(os.Stderr, i18n.T("error.restore_too_many_args"))
+		os.Exit(1)
+	}
+	dateArg := ""
+	if len(args) == 1 {
+		if !*doRestore && !*doRestoreFull {
+			printStartupHeader(path)
+			printUsage()
+			fmt.Fprintln(os.Stderr, i18n.T("error.restoredate_requires_restore"))
+			os.Exit(1)
+		}
+		dateArg = strings.TrimSpace(args[0])
 	}
 	if n == 0 {
 		printStartupHeader(path)
@@ -103,6 +132,12 @@ func main() {
 		return
 	case *doBackup:
 		runBackup(path, verbose)
+		return
+	case *doRestore:
+		runRestore(path, dateArg, false, verbose)
+		return
+	case *doRestoreFull:
+		runRestore(path, dateArg, true, verbose)
 		return
 	case *getFile != "":
 		runGetfile(path, *getFile, verbose)
@@ -149,6 +184,10 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.status_desc"))
 	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.backup"))
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.backup_desc"))
+	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.restore"))
+	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.restore_desc"))
+	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.restorefull"))
+	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.restorefull_desc"))
 	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.getfile"))
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.getfile_desc"))
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.getfile_wildcards"))
@@ -425,4 +464,56 @@ func runBackup(path string, verbose bool) {
 		os.Exit(1)
 	}
 	log.Info(i18n.T("log.msg.backup_ok"))
+}
+
+func runRestore(path, dateStr string, full bool, verbose bool) {
+	printStartupHeader(path)
+	cfg, log, err := loadConfigAndLog(path, verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, i18n.T("error.config")+"\n", err)
+		os.Exit(1)
+	}
+	defer log.Close()
+
+	var beforeDate *time.Time
+	if strings.TrimSpace(dateStr) != "" {
+		t, err := time.ParseInLocation("20060102", strings.TrimSpace(dateStr), time.Local)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, i18n.T("error.restoredate_format")+"\n", err)
+			os.Exit(1)
+		}
+		beforeDate = &t
+	}
+
+	files, err := retention.LastBackupBefore(cfg.BackupDir, beforeDate)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, i18n.T("error.restore_select")+"\n", err)
+		os.Exit(1)
+	}
+	if len(files) == 0 {
+		fmt.Fprintln(os.Stderr, i18n.T("error.restore_no_backup_found"))
+		os.Exit(1)
+	}
+
+	password := cfg.RootPassword
+	if full {
+		if err := restore.FullReinit(cfg, log); err != nil {
+			fmt.Fprintf(os.Stderr, i18n.T("error.restorefull")+"\n", err)
+			os.Exit(1)
+		}
+		password = ""
+	}
+
+	conn := &mysql.Conn{
+		Host:     cfg.MySQLHost,
+		Port:     cfg.MySQLPort,
+		User:     "root",
+		Password: password,
+		BinDir:   cfg.MySQLBin,
+	}
+	if err := restore.RestoreFromZips(conn, files, log); err != nil {
+		fmt.Fprintf(os.Stderr, i18n.T("error.restore")+"\n", err)
+		os.Exit(1)
+	}
+	log.Info(i18n.T("log.msg.restore_ok"))
 }

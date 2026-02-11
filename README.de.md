@@ -1,18 +1,27 @@
 # MySQL/MariaDB Backup
 
-Go-Programm zum Sichern aller MySQL/MariaDB-Datenbanken mit konfigurierbarer Aufbewahrung (täglich/wöchentlich/monatlich/jährlich), optionalem Remote-Kopie per SFTP und Fehler-E-Mail. Konfiguration über [janmz/sconfig](https://github.com/janmz/sconfig) (JSON) mit sicherer Passwortverwaltung.
+Go-Programm zum Sichern aller MySQL/MariaDB-Datenbanken mit konfigurierbarer
+Aufbewahrung (täglich/wöchentlich/monatlich/jährlich), optionalem Remote-Kopie
+per SFTP und Fehler-E-Mail. Konfiguration über
+[janmz/sconfig](https://github.com/janmz/sconfig) (JSON) mit sicherer Passwortverwaltung.
 
 **Donationware für CFI Kinderhilfe.** Lizenz: MIT mit Namensnennung.
 
 ## Funktionen
 
-- Sichert alle Benutzer-Datenbanken (ohne `information_schema`, `performance_schema`, `mysql`).
-- Exportiert User und Grants (MariaDB: `mysqldump --system=users`, MySQL: `mysqlpump --users`), parst die Ausgabe und hängt die zugehörigen CREATE USER/GRANT-Blöcke an jeden DB-Dump an (root bleibt außen vor).
-- Ein ZIP pro Datenbank: `mysql_backup_<yyyymmdd>_<hostname>_<databasename>.zip` mit einer SQL-Datei (Dump + User-Anhang + `FLUSH PRIVILEGES`).
-- Aufbewahrung: die letzten N täglichen/wöchentlichen/monatlichen/jährlichen Backups (wöchentlich = Sonntag, monatlich = letzter Tag im Monat, jährlich = 31.12.).
+- Sichert alle Benutzer-Datenbanken (ohne `information_schema`,
+ `performance_schema`, `mysql`).
+- Exportiert User und Grants (MariaDB: `mysqldump --system=users`,
+  MySQL: `mysqlpump --users`), parst die Ausgabe und hängt die zugehörigen
+  CREATE USER/GRANT-Blöcke an jeden DB-Dump an (root bleibt außen vor).
+- Ein ZIP pro Datenbank: `mysql_backup_<yyyymmdd>_<hostname>_<databasename>.zip`
+  mit einer SQL-Datei (Dump + User-Anhang + `FLUSH PRIVILEGES`).
+- Aufbewahrung: die letzten N täglichen/wöchentlichen/monatlichen/jährlichen
+  Backups (wöchentlich = Sonntag, monatlich = letzter Tag im Monat, jährlich = 31.12.).
 - Optionales Remote-Backup per SFTP.
 - E-Mail bei kritischen Fehlern (Speicherplatz, MySQL nicht erreichbar, Remote fehlgeschlagen).
-- **Automatische Einrichtung des Zeitplans** beim ersten Lauf: Windows Task Scheduler oder Linux systemd-Timer (kein separates Install-Kommando nötig).
+- **Automatische Einrichtung des Zeitplans** beim ersten Lauf: Windows Task
+  Scheduler oder Linux systemd-Timer (kein separates Install-Kommando nötig).
 - Plattformunabhängig: Windows und Linux (Pfade und Zeitplan passen sich an).
 
 ## Konfiguration
@@ -20,10 +29,12 @@ Go-Programm zum Sichern aller MySQL/MariaDB-Datenbanken mit konfigurierbarer Auf
 Kopiere `config.example.json` nach `config.json` und setze:
 
 | Feld | Beschreibung |
-|------|--------------|
+| ---- | ------------ |
 | `mysql_host`, `mysql_port` | MySQL/MariaDB-Server |
 | `mysql_bin` | Optional: Verzeichnis mit mysql, mysqldump, mysqlpump (z. B. `D:\xampp\mysql\bin`), wenn nicht im PATH |
 | `mysql_auto_start_stop`, `mysql_start_cmd`, `mysql_stop_cmd` | Optional: Wenn MySQL nicht läuft (z. B. XAMPP), vor Backup starten und danach wieder stoppen. Beispiel: `mysql_start_cmd`: `C:\xampp\mysql_start.bat`, `mysql_stop_cmd`: `C:\xampp\mysql_stop.bat` |
+| `mysql_data_dir` | Datenverzeichnis der Instanz (erforderlich für `--restorefull`) |
+| `mysql_backup_dir` | Optionales Instanz-Backup-Verzeichnis als Vorlage für die Dateninitialisierung. Wenn leer, wird `backup` neben `mysql_data_dir` verwendet |
 | `root_password` / `root_secure_password` | Root-Passwort (sconfig verschlüsselt in `root_secure_password`) |
 | `retain_daily`, `retain_weekly`, `retain_monthly`, `retain_yearly` | Wie viele Backups pro Periode behalten |
 | `backup_dir` | Lokales Backup-Verzeichnis |
@@ -32,7 +43,8 @@ Kopiere `config.example.json` nach `config.json` und setze:
 | `remote_backup_dir`, `remote_ssh_*` | Optionales SFTP-Remote-Backup |
 | `start_time` | Tägliche Startzeit (HH:MM, Standard 22:00) für den Zeitplan |
 
-Die Config-Datei wird gesucht in: `-config`-Pfad, dann aktuellem Verzeichnis (`config.json`), dann Benutzer-Home.
+Die Config-Datei wird gesucht in: `-config`-Pfad, dann aktuellem Verzeichnis
+(`config.json`), dann Benutzer-Home.
 
 ## Aufruf
 
@@ -46,6 +58,18 @@ mysqlbackup --status -config /pfad/zur/config.json
 mysqlbackup --backup
 mysqlbackup --backup -config /pfad/zur/config.json
 
+# Restore vom letzten Backup-Tag (alle ZIPs dieses Datums)
+mysqlbackup --restore
+
+# Restore vom letzten Backup-Tag vor einem Datum
+mysqlbackup --restore 20250210
+
+# Full-Restore (MySQL stoppen, data -> data.old, Instanz-backup -> data, dann Import)
+mysqlbackup --restorefull
+
+# Full-Restore vom letzten Backup vor einem Datum
+mysqlbackup --restorefull 20250210
+
 # Geplante Jobs anlegen (Windows Task Scheduler / Linux systemd-Timer)
 mysqlbackup --init
 
@@ -58,19 +82,36 @@ mysqlbackup --cleanconfig
 
 ## Wiederherstellung
 
-Jedes ZIP enthält eine SQL-Datei (z. B. `mydb.sql`). Wiederherstellen mit:
+Jedes ZIP enthält eine SQL-Datei (z. B. `mydb.sql`).
+
+### Restore-Modi
+
+- `--restore`: importiert den letzten Backup-Tag (oder den letzten
+  Backup-Tag vor optionalem letztem Parameter `YYYYMMDD`).
+
+- `--restorefull`: vollständige Neuinitialisierung für Instanzen mit
+  `backup`-Vorlagenverzeichnis:
+  - Server stoppen (falls laufend)
+  - `data` nach `data.old` umbenennen
+  - Instanz-`backup` nach `data` kopieren
+  - Server starten (root im Template üblicherweise leer)
+  - ausgewählte Backup-ZIPs importieren
+
+Manueller Restore aus einem einzelnen ZIP:
 
 ```bash
 unzip mysql_backup_20250131_localhost_mydb.zip
 mysql -u root -p < mydb.sql
 ```
 
-Die SQL enthält den DB-Dump und die User/Grants, die Rechte auf diese Datenbank haben (root nicht enthalten).
+Die SQL enthält den DB-Dump und die User/Grants, die Rechte auf diese Datenbank
+haben (root nicht enthalten).
 
 ## Anforderungen
 
 - Go 1.21+
-- `mysql` und `mysqldump` (und für MySQL User-Export: `mysqlpump` oder Fallback ohne User-Passwörter) im PATH
+- `mysql` und `mysqldump` (und für MySQL User-Export: `mysqlpump` oder Fallback
+  ohne User-Passwörter) im PATH
 - Windows: Task Scheduler (schtasks). Linux: systemd (User oder System).
 
 ## Build

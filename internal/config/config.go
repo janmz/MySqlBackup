@@ -15,10 +15,12 @@ import (
 type Config struct {
 	Version int `json:"version"`
 
-	MySQLHost     string `json:"mysql_host"`
-	MySQLHostname string `json:"mysql_hostname"` // optional: für Benennung (Backup-Dateien), wenn mysql_host = localhost
-	MySQLPort     int    `json:"mysql_port"`
-	MySQLBin      string `json:"mysql_bin"` // optional: Verzeichnis mit mysql, mysqldump, mysqlpump (z. B. D:\xampp\mysql\bin)
+	MySQLHost      string `json:"mysql_host"`
+	MySQLHostname  string `json:"mysql_hostname"` // optional: für Benennung (Backup-Dateien), wenn mysql_host = localhost
+	MySQLPort      int    `json:"mysql_port"`
+	MySQLBin       string `json:"mysql_bin"`        // optional: Verzeichnis mit mysql, mysqldump, mysqlpump (z. B. D:\xampp\mysql\bin)
+	MySQLDataDir   string `json:"mysql_data_dir"`   // Pfad zum data-Verzeichnis der Instanz (für -restorefull)
+	MySQLBackupDir string `json:"mysql_backup_dir"` // optional: Pfad zum backup-Verzeichnis der Instanz (für -restorefull), leer = Nachbar von mysql_data_dir
 
 	// MySQL-Lifecycle (z. B. XAMPP): bei Backup prüfen, ob MySQL läuft; wenn nicht, starten, nach Backup wieder stoppen.
 	MySQLAutoStartStop bool   `json:"mysql_auto_start_stop"`
@@ -102,6 +104,12 @@ func (c *Config) normalizePaths() {
 	c.RemoteBackupDir = filepath.FromSlash(filepath.Clean(c.RemoteBackupDir))
 	if c.MySQLBin != "" {
 		c.MySQLBin = filepath.FromSlash(filepath.Clean(c.MySQLBin))
+	}
+	if c.MySQLDataDir != "" {
+		c.MySQLDataDir = filepath.FromSlash(filepath.Clean(c.MySQLDataDir))
+	}
+	if c.MySQLBackupDir != "" {
+		c.MySQLBackupDir = filepath.FromSlash(filepath.Clean(c.MySQLBackupDir))
 	}
 	if c.RemoteSSHKeyFile != "" {
 		c.RemoteSSHKeyFile = filepath.FromSlash(filepath.Clean(c.RemoteSSHKeyFile))

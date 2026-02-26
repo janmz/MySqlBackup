@@ -16,6 +16,8 @@ import (
 	"github.com/janmz/mysqlbackup/internal/config"
 	"github.com/janmz/mysqlbackup/internal/i18n"
 	"github.com/janmz/mysqlbackup/internal/logger"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 )
 
 const (
@@ -45,6 +47,22 @@ func runWithDebug(log *logger.Logger, cmd *exec.Cmd) ([]byte, error) {
 	return out, err
 }
 
+// getWindowsTaskRunStringFull returns the task's full run string (Execute + Arguments) via PowerShell, without truncation.
+// schtasks /FO LIST /V truncates long lines; PowerShell returns the full value.
+func getWindowsTaskRunStringFull(log *logger.Logger) (string, error) {
+	script := `$t = Get-ScheduledTask -TaskName '` + taskNameWindows + `' -ErrorAction SilentlyContinue; if ($t -and $t.Actions.Count -gt 0) { $a = $t.Actions[0]; $a.Execute + ' ' + $a.Arguments }`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := runWithDebug(log, cmd)
+	if err != nil {
+		return "", err
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "", errors.New("empty task run string")
+	}
+	return s, nil
+}
+
 // EnsureInstalled checks if a schedule exists and is up to date (paths match); if not or paths changed, (re)creates it.
 // On Windows also applies WakeToRun, StartWhenAvailable, ExecutionTimeLimit 12h. Call from --backup and --status.
 func EnsureInstalled(cfg *config.Config, configPath string, log *logger.Logger) error {
@@ -54,125 +72,225 @@ func EnsureInstalled(cfg *config.Config, configPath string, log *logger.Logger) 
 	return ensureUnix(cfg, configPath, log)
 }
 
-// windowsTaskGetRunString returns the current task's run string (Execute + Arguments) for comparison.
-// Prefer PowerShell so we get the exact stored value; fallback to schtasks output.
-func windowsTaskGetRunString(log *logger.Logger) (string, error) {
-	// PowerShell returns the exact stored Execute and Arguments (no re-quoting)
-	script := `$t = Get-ScheduledTask -TaskName '` + taskNameWindows + `' -ErrorAction SilentlyContinue; if ($t -and $t.Actions.Count -gt 0) { $a = $t.Actions[0]; $a.Execute + ' ' + $a.Arguments }`
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	out, err := runWithDebug(log, cmd)
-	if err == nil {
-		s := strings.TrimSpace(string(out))
-		if s != "" {
-			return s, nil
-		}
-	}
-	// Fallback: schtasks (may show different quoting)
-	cmd = exec.Command("schtasks", "/Query", "/TN", taskNameWindows, "/FO", "LIST", "/V")
-	out, err = runWithDebug(log, cmd)
-	if err != nil {
-		return "", err
-	}
-	const prefix = "Task To Run:"
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix)), nil
-		}
-	}
-	return "", fmt.Errorf(i18n.T("err.task_cmd_not_found"))
+// windowsTaskInfo holds parsed fields from schtasks /Query /FO LIST /V (EN/DE).
+type windowsTaskInfo struct {
+	Hostname     string
+	TaskToRun    string
+	Status       string
+	ScheduleType string
+	StartTime    string
+	Days         string
 }
 
-// windowsTaskGetCommand returns the current task's exe and config path from schtasks /Query /FO LIST /V.
-// Supports: "exe" --backup -config "config"; cmd /c cd /d "dir" && "exe" ... (new); cmd /c "cd /d \"dir\" && \"exe\" ..." (legacy).
-func windowsTaskGetCommand(log *logger.Logger) (exe, configPath string, err error) {
-	cmd := exec.Command("schtasks", "/Query", "/TN", taskNameWindows, "/FO", "LIST", "/V")
-	out, err := runWithDebug(log, cmd)
-	if err != nil {
-		return "", "", err
+// schtasks output labels (language-dependent); longer prefixes first to avoid false matches.
+var (
+	taskToRunPrefixes = []string{
+		"Auszuführende Aufgabe:", // German
+		"Task To Run:",           // English
 	}
-	const prefix = "Task To Run:"
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, prefix) {
-			continue
+	hostnameLabels = []string{
+		"Hostname:", // German
+		"HostName:", // English
+	}
+	statusLabels = []string{
+		"Status der geplanten Aufgabe:", // German
+		"Status:",                       // English
+	}
+	scheduleTypeLabels = []string{
+		"Zeitplantyp:",   // German
+		"Schedule Type:", // English
+	}
+	startTimeLabels = []string{
+		"Startzeit:",  // German
+		"Start Time:", // English
+	}
+	daysLabels = []string{
+		"Tage:", // German
+		"Days:", // English
+	}
+)
+
+// extractLabelValue returns the value after the first matching label, or ("", false).
+func extractLabelValue(line string, labels []string) (string, bool) {
+	line = strings.TrimSpace(line)
+	for _, prefix := range labels {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix)), true
 		}
-		rest := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		if len(rest) < 2 {
-			continue
+	}
+	return "", false
+}
+
+// decodeCodepage decodes bytes from the given charmap (e.g. CP850 or CP1252) to UTF-8.
+func decodeCodepage(enc *charmap.Charmap, b []byte) ([]byte, error) {
+	dec := enc.NewDecoder()
+	decoded, _, err := transform.Bytes(dec, b)
+	return decoded, err
+}
+
+// windowsTaskParseInfo parses schtasks /Query /FO LIST /V output into windowsTaskInfo (EN/DE).
+// schtasks on German Windows often uses the OEM code page (CP850) for console output, not CP1252.
+// Try UTF-8, then CP850, then CP1252 until TaskToRun is found.
+func windowsTaskParseInfo(out []byte) (info windowsTaskInfo) {
+	parse := func(raw []byte) windowsTaskInfo {
+		var i windowsTaskInfo
+		for _, line := range strings.Split(string(raw), "\n") {
+			if v, ok := extractLabelValue(line, hostnameLabels); ok {
+				i.Hostname = v
+			}
+			if v, ok := extractLabelValue(line, taskToRunPrefixes); ok {
+				i.TaskToRun = v
+			}
+			if v, ok := extractLabelValue(line, statusLabels); ok {
+				i.Status = v
+			}
+			if v, ok := extractLabelValue(line, scheduleTypeLabels); ok {
+				i.ScheduleType = v
+			}
+			if v, ok := extractLabelValue(line, startTimeLabels); ok {
+				i.StartTime = v
+			}
+			if v, ok := extractLabelValue(line, daysLabels); ok {
+				i.Days = v
+			}
 		}
-		// Format 1a: cmd /c cd /d "workDir" or cmd.exe /c cd /d "workDir" (no outer quotes, plain " paths)
-		afterCdPrefix := ""
-		if strings.HasPrefix(rest, "cmd.exe /c cd /d ") {
-			afterCdPrefix = "cmd.exe /c cd /d "
-		} else if strings.HasPrefix(rest, "cmd /c cd /d ") {
-			afterCdPrefix = "cmd /c cd /d "
+		return i
+	}
+	info = parse(out)
+	if info.TaskToRun == "" {
+		if decoded, err := decodeCodepage(charmap.CodePage850, out); err == nil {
+			info = parse(decoded)
 		}
-		if afterCdPrefix != "" && strings.Contains(rest, " && ") {
-			afterCd := strings.TrimSpace(rest[len(afterCdPrefix):])
-			_, rest2, ok := extractDoubleQuoted(afterCd)
-			if ok {
-				rest2 = strings.TrimSpace(rest2)
-				if strings.HasPrefix(rest2, "&& ") {
-					e, rest2, ok := extractDoubleQuoted(strings.TrimSpace(rest2[3:]))
-					if ok {
-						rest2 = strings.TrimSpace(rest2)
-						if idx := strings.Index(rest2, "-config "); idx >= 0 {
-							c, _, ok := extractDoubleQuoted(strings.TrimSpace(rest2[idx+8:]))
-							if ok {
-								return e, c, nil
-							}
+	}
+	if info.TaskToRun == "" {
+		if decoded, err := decodeCodepage(charmap.Windows1252, out); err == nil {
+			info = parse(decoded)
+		}
+	}
+	return info
+}
+
+// parseTaskRunToExeConfig extracts exe and config path from a "Task To Run" command string.
+// Supports: "exe" --backup -config "config"; cmd /c cd /d "dir" && "exe" ...; legacy backslash-quoted.
+// schtasks output may use backslash-quoted form (\\" or \" instead of "); normalize so extractDoubleQuoted sees real quotes.
+func parseTaskRunToExeConfig(rest string) (exe, configPath string, ok bool) {
+	rest = strings.ReplaceAll(rest, `\\"`, `"`) // zuerst \\" (doppelt escaped)
+	rest = strings.ReplaceAll(rest, `\"`, `"`)  // dann \"
+	if len(rest) < 2 {
+		return "", "", false
+	}
+	// Format 1a: cmd.exe /c cd /d "workDir" && "exe" --backup -config "configPath"
+	afterCdPrefix := ""
+	if strings.HasPrefix(rest, "cmd.exe /c cd /d ") {
+		afterCdPrefix = "cmd.exe /c cd /d "
+	} else if strings.HasPrefix(rest, "cmd /c cd /d ") {
+		afterCdPrefix = "cmd /c cd /d "
+	}
+	if afterCdPrefix != "" && strings.Contains(rest, " && ") {
+		afterCd := strings.TrimSpace(rest[len(afterCdPrefix):])
+		_, rest2, ok1 := extractDoubleQuoted(afterCd)
+		if ok1 {
+			rest2 = strings.TrimSpace(rest2)
+			if strings.HasPrefix(rest2, "&& ") {
+				e, rest2, ok1 := extractDoubleQuoted(strings.TrimSpace(rest2[3:]))
+				if ok1 {
+					rest2 = strings.TrimSpace(rest2)
+					if idx := strings.Index(rest2, "-config "); idx >= 0 {
+						c, _, ok1 := extractDoubleQuoted(strings.TrimSpace(rest2[idx+8:]))
+						if ok1 {
+							return e, c, true
 						}
 					}
 				}
 			}
 		}
-		// Format 1b (legacy): cmd /c "cd /d \"workDir\" && \"exe\" --backup -config \"configPath\""
-		if strings.HasPrefix(rest, "cmd ") && strings.Contains(rest, "cd /d ") && strings.Contains(rest, " && ") {
-			quoted := extractBackslashQuotedPaths(rest)
-			if len(quoted) >= 3 {
-				return quoted[1], quoted[2], nil
-			}
-		}
-		// Format 2: "exe" --backup -config "configPath"
-		if rest[0] != '"' && rest[0] != '\'' {
-			continue
-		}
-		quote := rest[0]
-		end := 1
-		for end < len(rest) {
-			if rest[end] == quote && (end == 0 || rest[end-1] != '\\') {
-				break
-			}
-			end++
-		}
-		if end >= len(rest) {
-			continue
-		}
-		exe = rest[1:end]
-		rest = strings.TrimSpace(rest[end+1:])
-		if !strings.Contains(rest, "-config") {
-			continue
-		}
-		idx := strings.Index(rest, "-config")
-		rest = strings.TrimSpace(rest[idx+7:])
-		if len(rest) < 2 || (rest[0] != '"' && rest[0] != '\'') {
-			continue
-		}
-		quote2 := rest[0]
-		end2 := 1
-		for end2 < len(rest) {
-			if rest[end2] == quote2 && (end2 == 0 || rest[end2-1] != '\\') {
-				break
-			}
-			end2++
-		}
-		if end2 < len(rest) {
-			configPath = rest[1:end2]
-		}
-		return exe, configPath, nil
 	}
-	return "", "", fmt.Errorf(i18n.T("err.task_cmd_not_found"))
+	// Format 1b (legacy): cmd /c "cd /d \"workDir\" && \"exe\" ..."
+	if strings.HasPrefix(rest, "cmd ") && strings.Contains(rest, "cd /d ") && strings.Contains(rest, " && ") {
+		quoted := extractBackslashQuotedPaths(rest)
+		if len(quoted) >= 3 {
+			return quoted[1], quoted[2], true
+		}
+	}
+	// Format 2: "exe" --backup -config "configPath"
+	if rest[0] != '"' && rest[0] != '\'' {
+		return "", "", false
+	}
+	quote := rest[0]
+	end := 1
+	for end < len(rest) {
+		if rest[end] == quote && (end == 0 || rest[end-1] != '\\') {
+			break
+		}
+		end++
+	}
+	if end >= len(rest) {
+		return "", "", false
+	}
+	exe = rest[1:end]
+	rest = strings.TrimSpace(rest[end+1:])
+	if !strings.Contains(rest, "-config") {
+		return "", "", false
+	}
+	idx := strings.Index(rest, "-config")
+	rest = strings.TrimSpace(rest[idx+7:])
+	if len(rest) < 2 || (rest[0] != '"' && rest[0] != '\'') {
+		return "", "", false
+	}
+	quote2 := rest[0]
+	end2 := 1
+	for end2 < len(rest) {
+		if rest[end2] == quote2 && (end2 == 0 || rest[end2-1] != '\\') {
+			break
+		}
+		end2++
+	}
+	if end2 < len(rest) {
+		configPath = rest[1:end2]
+	}
+	return exe, configPath, true
+}
+
+// windowsTaskInfoMatches returns true if the parsed task matches desired hostname, exe/config paths, and start time.
+// Also checks Status (Enabled/Aktiviert), ScheduleType (Daily/Täglich), and Days (daily pattern).
+func windowsTaskInfoMatches(info windowsTaskInfo, hostname, exeTask, configPathTask, startTime string) bool {
+	taskExe, taskConfig, ok := parseTaskRunToExeConfig(info.TaskToRun)
+	if !ok || !windowsPathsMatch(exeTask, configPathTask, taskExe, taskConfig) {
+		return false
+	}
+	if hostname != "" && !strings.EqualFold(strings.TrimSpace(info.Hostname), strings.TrimSpace(hostname)) {
+		return false
+	}
+	status := strings.TrimSpace(info.Status)
+	if status != "Enabled" && status != "Aktiviert" && status != "Ready" && status != "Bereit" {
+		return false
+	}
+	sched := strings.TrimSpace(info.ScheduleType)
+	if sched != "Daily" && sched != "Täglich" {
+		return false
+	}
+	// StartTime: cfg is "HH:MM", output often "HH:MM:SS"; normalize both to HH:MM:00 for comparison
+	want := strings.TrimSpace(startTime)
+	if len(want) == 5 && want[2] == ':' {
+		want = want + ":00"
+	}
+	got := strings.TrimSpace(info.StartTime)
+	if len(got) >= 8 {
+		got = got[:8]
+	} else if len(got) == 5 && got[2] == ':' {
+		got = got + ":00"
+	}
+	if want != got {
+		return false
+	}
+	days := strings.TrimSpace(info.Days)
+	if days == "" {
+		return false
+	}
+	if !strings.Contains(days, " 1 ") || (!strings.Contains(strings.ToLower(days), "day") && !strings.Contains(days, "Tag")) {
+		return false
+	}
+	return true
 }
 
 // extractDoubleQuoted parses a double-quoted string at the start of s ("" inside is one "). Returns content, rest, ok.
@@ -235,7 +353,8 @@ func windowsPathsMatch(currentExe, currentConfig, taskExe, taskConfig string) bo
 
 // resolveDriveToUNC converts a path like N:\folder to \\server\share\folder when N: is a mapped network drive.
 // Returns the original path if not Windows, not a drive letter, or resolution fails.
-func resolveDriveToUNC(path string, log *logger.Logger) string {
+// On Windows uses WNetGetConnectionW (mpr.dll); return codes: 0 = success, 2250 = not network drive, 1200 = invalid drive, 234 = buffer too small (retry with bufLen).
+func resolveDriveToUNC(path string) string {
 	if runtime.GOOS != "windows" || path == "" {
 		return path
 	}
@@ -249,18 +368,10 @@ func resolveDriveToUNC(path string, log *logger.Logger) string {
 	if (drive[0] < 'A' || drive[0] > 'Z') && (drive[0] < 'a' || drive[0] > 'z') {
 		return path
 	}
-	// PowerShell: get RemoteName for this drive (only set for network drives)
-	script := fmt.Sprintf("try { (Get-Item -LiteralPath '%s').PSDrive.RemoteName } catch { '' }", drive+`\`)
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	out, err := runWithDebug(log, cmd)
-	if err != nil {
+	uncRoot, ok := getUNCForDrive(drive)
+	if !ok {
 		return path
 	}
-	uncRoot := strings.TrimSpace(string(out))
-	if uncRoot == "" || !strings.HasPrefix(uncRoot, `\\`) {
-		return path
-	}
-	uncRoot = strings.TrimSuffix(uncRoot, `\`)
 	rest := path[2:] // "\folder\file" or "folder\file"
 	if len(rest) > 0 && rest[0] != '\\' {
 		rest = `\` + rest
@@ -274,12 +385,12 @@ func applyWindowsTaskSettings(log *logger.Logger) {
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	if _, err := runWithDebug(log, cmd); err != nil {
 		if log != nil {
-			log.Warn(i18n.Tf("log.warn.powershell_settings", err))
+			log.WarnS(i18n.Tf("log.warn.powershell_settings", err))
 		}
 		return
 	}
 	if log != nil {
-		log.Info(i18n.T("log.msg.windows_task_settings"))
+		log.InfoS(i18n.T("log.msg.windows_task_settings"))
 	}
 }
 
@@ -291,16 +402,16 @@ func applyWindowsTaskWorkingDir(workDir string, log *logger.Logger) {
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	if _, err := runWithDebug(log, cmd); err != nil {
 		if log != nil {
-			log.Warn(i18n.Tf("log.warn.powershell_workdir", err))
+			log.WarnS(i18n.Tf("log.warn.powershell_workdir", err))
 		}
 		return
 	}
 	if log != nil {
-		log.Info(i18n.T("log.msg.windows_task_workdir"))
+		log.InfoS(i18n.T("log.msg.windows_task_workdir"))
 	}
 }
 
-// escapeForPSSingleQuoted escapes a string for use inside a PowerShell single-quoted string (' -> '').
+// escapeForPSSingleQuoted escapes a string for use inside a PowerShell single-quoted string (' -> ”).
 func escapeForPSSingleQuoted(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
@@ -335,9 +446,9 @@ func ensureWindows(cfg *config.Config, configPath string, log *logger.Logger) er
 		workDir = "."
 	}
 	// Prefer UNC paths for the task so it works when drive letters differ or are missing for the task user
-	exeTask := resolveDriveToUNC(exe, log)
-	configPathTask := resolveDriveToUNC(configPath, log)
-	workDirTask := resolveDriveToUNC(workDir, log)
+	exeTask := resolveDriveToUNC(exe)
+	configPathTask := resolveDriveToUNC(configPath)
+	workDirTask := resolveDriveToUNC(workDir)
 
 	startTime := cfg.StartTime
 	if startTime == "" {
@@ -351,24 +462,28 @@ func ensureWindows(cfg *config.Config, configPath string, log *logger.Logger) er
 	// Build the exact command we store: "cmd.exe /c cd /d "workDir" && "exe" --backup -config "configPath"" (paths with " escaped as "")
 	pathForTR := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
 	cmdArgument := fmt.Sprintf(`/c cd /d "%s" && "%s" --backup -config "%s"`, pathForTR(workDirTask), pathForTR(exeTask), pathForTR(configPathTask))
-	plannedTaskRun := "cmd.exe " + cmdArgument
 
-	// If task exists, compare run string; only recreate when it differs (prevents losing task history)
-	cmd := exec.Command("schtasks", "/Query", "/TN", taskNameWindows)
-	_, errQuery := runWithDebug(log, cmd)
+	// If task exists, compare Hostname, Auszuführende Aufgabe (exe/config), Status, Zeitplantyp, Startzeit, Tage
+	cmd := exec.Command("schtasks", "/Query", "/TN", taskNameWindows, "/FO", "LIST", "/V")
+	out, errQuery := runWithDebug(log, cmd)
 	taskExists := errQuery == nil
 	if taskExists {
-		existingRun, errGet := windowsTaskGetRunString(log)
-		if errGet == nil && strings.TrimSpace(existingRun) == strings.TrimSpace(plannedTaskRun) {
+		info := windowsTaskParseInfo(out)
+		// schtasks truncates long lines; get full command via PowerShell so --config path is readable
+		if fullCmd, err := getWindowsTaskRunStringFull(log); err == nil && fullCmd != "" {
+			info.TaskToRun = fullCmd
+		}
+		hostname, _ := os.Hostname()
+		if windowsTaskInfoMatches(info, hostname, exeTask, configPathTask, startTime) {
 			applyWindowsTaskSettings(log)
 			applyWindowsTaskWorkingDir(workDirTask, log)
-			log.Info(i18n.Tf("log.msg.windows_task_uptodate", taskNameWindows))
+			log.InfoS(i18n.Tf("log.msg.windows_task_uptodate", taskNameWindows))
 			return nil
 		}
-		if errGet == nil {
-			log.Info(i18n.T("log.msg.windows_task_updating"))
+		if info.TaskToRun != "" {
+			log.InfoS(i18n.T("log.msg.windows_task_updating"))
 		}
-		// Delete so we can recreate with correct command
+		// Delete so we can recreate with correct command and schedule
 		del := exec.Command("schtasks", "/Delete", "/TN", taskNameWindows, "/F")
 		_, _ = runWithDebug(log, del)
 	}
@@ -377,7 +492,7 @@ func ensureWindows(cfg *config.Config, configPath string, log *logger.Logger) er
 	if err := createWindowsTaskViaPowerShell(taskNameWindows, cmdArgument, workDirTask, startTime, log); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("err.schtasks_create"), err)
 	}
-	log.Info(i18n.Tf("log.msg.windows_task_created", taskNameWindows, startTime))
+	log.InfoS(i18n.Tf("log.msg.windows_task_created", taskNameWindows, startTime))
 	applyWindowsTaskSettings(log)
 	applyWindowsTaskWorkingDir(workDirTask, log)
 	return nil
@@ -392,13 +507,13 @@ func ensureUnix(cfg *config.Config, configPath string, log *logger.Logger) error
 	userDir := filepath.Join(home, ".config", "systemd", "user")
 	timerPath := filepath.Join(userDir, serviceName+".timer")
 	if _, err := os.Stat(timerPath); err == nil {
-		log.Info(i18n.Tf("log.msg.systemd_exists", timerPath))
+		log.InfoS(i18n.Tf("log.msg.systemd_exists", timerPath))
 		return nil
 	}
 	if systemdUserAvailable(log) {
 		return ensureLinuxSystemd(cfg, configPath, log)
 	}
-	log.Warn(i18n.T("log.warn.systemd_fallback"))
+	log.WarnS(i18n.T("log.warn.systemd_fallback"))
 	return ensureUnixCron(cfg, configPath, log)
 }
 
@@ -469,7 +584,7 @@ WantedBy=timers.target
 	if err := os.WriteFile(timerPath, []byte(timerContent), 0644); err != nil {
 		return fmt.Errorf(i18n.T("err.write_timer"), err)
 	}
-	log.Info(i18n.Tf("log.msg.systemd_created", userDir, serviceName))
+	log.InfoS(i18n.Tf("log.msg.systemd_created", userDir, serviceName))
 	return nil
 }
 
@@ -505,7 +620,7 @@ func ensureUnixCron(cfg *config.Config, configPath string, log *logger.Logger) e
 	existing, err := getCrontab()
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return ensureUnixCronSystemFile(hour, min, exe, cronLineSystem, log)
+			return ensureUnixCronSystemFile(hour, min, cronLineSystem, log)
 		}
 		return fmt.Errorf(i18n.T("err.crontab_l"), err)
 	}
@@ -519,7 +634,7 @@ func ensureUnixCron(cfg *config.Config, configPath string, log *logger.Logger) e
 		if strings.Contains(lineStr, cronMarker) {
 			foundMarker = true
 			if lineStr == cronLineUser {
-				log.Info(i18n.T("log.msg.cron_present"))
+				log.InfoS(i18n.T("log.msg.cron_present"))
 				return nil
 			}
 			// Replace first matching line; skip any further lines that also contain the marker
@@ -546,16 +661,16 @@ func ensureUnixCron(cfg *config.Config, configPath string, log *logger.Logger) e
 	}
 	if err := setCrontab(newCrontab.Bytes()); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return ensureUnixCronSystemFile(hour, min, exe, cronLineSystem, log)
+			return ensureUnixCronSystemFile(hour, min, cronLineSystem, log)
 		}
 		return fmt.Errorf(i18n.T("err.crontab"), err)
 	}
-	log.Info(i18n.Tf("log.msg.cron_added", hour, min))
+	log.InfoS(i18n.Tf("log.msg.cron_added", hour, min))
 	return nil
 }
 
 // ensureUnixCronSystemFile appends the cron line to /etc/crontab (or /usr/etc/crontab) when crontab executable is not available.
-func ensureUnixCronSystemFile(hour, min int, exe, cronLine string, log *logger.Logger) error {
+func ensureUnixCronSystemFile(hour, min int, cronLine string, log *logger.Logger) error {
 	var path string
 	var data []byte
 	var err error
@@ -579,7 +694,7 @@ func ensureUnixCronSystemFile(hour, min int, exe, cronLine string, log *logger.L
 		if strings.Contains(lineStr, cronMarker) {
 			foundMarker = true
 			if lineStr == cronLine {
-				log.Info(i18n.Tf("log.msg.cron_present_file", path))
+				log.InfoS(i18n.Tf("log.msg.cron_present_file", path))
 				return nil
 			}
 			if !replacedOrAppended {
@@ -606,7 +721,7 @@ func ensureUnixCronSystemFile(hour, min int, exe, cronLine string, log *logger.L
 	if err := os.WriteFile(path, newContent.Bytes(), 0644); err != nil {
 		return fmt.Errorf(i18n.Tf("err.write_cron_need_root", path), err, cronLine)
 	}
-	log.Info(i18n.Tf("log.msg.cron_added_file", path, hour, min))
+	log.InfoS(i18n.Tf("log.msg.cron_added_file", path, hour, min))
 	return nil
 }
 

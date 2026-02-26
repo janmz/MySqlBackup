@@ -5,14 +5,16 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.2.0.65 (in version.go zu ändern)
+// Version: 1.3.0.72 (in version.go zu ändern)
 //
 // ChangeLog:
+// 26.02.26	1.3.0	Fixed: checking of existing windows tasks, Feature: Overview of backups by classes and calculating average backup time
 // 11.02.26	1.2.0	Feature: included an way to fully restore a database
 // 09.02.26	1.1.5	Fixed: Quotes for task scheduler arguments corrected
 // 09.02.26	1.1.4	Fixed structure to comply with prepreaBuild
 //
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -229,9 +231,85 @@ func logStartup(log *logger.Logger) {
 	if err != nil {
 		exe = os.Args[0]
 	}
-	log.Info(i18n.Tf("log.start.executable", exe))
-	log.Info(i18n.Tf("log.start.version", Version))
-	log.Info(i18n.Tf("log.start.arguments", os.Args[1:]))
+	log.InfoS(i18n.Tf("log.start.executable", exe))
+	log.InfoS(i18n.Tf("log.start.version", Version))
+	log.InfoS(i18n.Tf("log.start.arguments", os.Args[1:]))
+}
+
+// getLogPath returns the log file path from config (same resolution as loadConfigAndLog).
+func getLogPath(cfg *config.Config) string {
+	logPath := cfg.LogFilename
+	if logPath != "" {
+		return filepath.FromSlash(filepath.Clean(logPath))
+	}
+	if exe, err := os.Executable(); err == nil {
+		if exeDir := filepath.Dir(exe); exeDir != "" {
+			return filepath.Join(exeDir, "mysqlbackup.log")
+		}
+	}
+	return filepath.Join(cfg.BackupDir, "mysqlbackup.log")
+}
+
+// logLineTimestamp parses the RFC3339 timestamp from a log line ("2006-01-02T15:04:05Z07:00 [LEVEL] msg"). Returns zero time if not found.
+func logLineTimestamp(line string) time.Time {
+	idx := strings.Index(line, " [")
+	if idx <= 0 {
+		return time.Time{}
+	}
+	t, _ := time.Parse(time.RFC3339, strings.TrimSpace(line[:idx]))
+	return t
+}
+
+// isBackupStart returns true if the line is the backup run start (log.start.arguments with "[--backup ").
+// Application and log are assumed to use the same language; uses i18n.T("log.start.arguments") prefix.
+func isBackupStart(line string) bool {
+	prefix := strings.Replace(i18n.T("log.start.arguments"), "%v", "", 1)
+	if !strings.Contains(line, prefix) {
+		return false
+	}
+	if !strings.Contains(line, " -backup ") && !strings.Contains(line, "[--backup ") {
+		return false
+	}
+	if strings.Contains(line, " -restore") || strings.Contains(line, "--restore") {
+		return false
+	}
+	return true
+}
+
+// isBackupOK returns true if the line is log.msg.backup_ok. Application and log same language; uses i18n.T().
+func isBackupOK(line string) bool {
+	return strings.Contains(line, i18n.T("log.msg.backup_ok"))
+}
+
+// lastBackupDurations reads the log file and returns the last n backup durations in seconds (chronological order).
+// Start = log line with header.arguments containing "[--backup "; End = log line with log.msg.backup_ok.
+func lastBackupDurations(logPath string, n int) ([]int, error) {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var durations []int
+	var startTime time.Time
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		t := logLineTimestamp(line)
+		if isBackupStart(line) {
+			startTime = t
+		}
+		if isBackupOK(line) && !startTime.IsZero() {
+			durations = append(durations, int(t.Sub(startTime).Seconds()))
+			startTime = time.Time{}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if len(durations) <= n {
+		return durations, nil
+	}
+	return durations[len(durations)-n:], nil
 }
 
 // printStartupHeader schreibt denselben Header wie beim Backup (Version, Aufrufpfad, Parameter, Config-Pfad) auf stderr, damit bei jedem Aufruf die laufende Version sichtbar ist.
@@ -240,15 +318,15 @@ func printStartupHeader(configPath string) {
 	if err != nil {
 		exe = os.Args[0]
 	}
-	fmt.Fprintf(os.Stderr, i18n.Tf("header.version", Version)+"\n")
-	fmt.Fprintf(os.Stderr, i18n.Tf("header.executable", exe)+"\n")
-	fmt.Fprintf(os.Stderr, i18n.Tf("header.arguments", os.Args[1:])+"\n")
+	fmt.Fprintln(os.Stderr, i18n.Tf("header.version", Version))
+	fmt.Fprintln(os.Stderr, i18n.Tf("header.executable", exe))
+	fmt.Fprintln(os.Stderr, i18n.Tf("header.arguments", os.Args[1:]))
 	if configPath != "" {
 		absPath, err := filepath.Abs(configPath)
 		if err != nil {
 			absPath = configPath
 		}
-		fmt.Fprintf(os.Stderr, i18n.Tf("section.config_file", absPath)+"\n")
+		fmt.Fprintln(os.Stderr, i18n.Tf("section.config_file", absPath))
 	}
 }
 
@@ -314,7 +392,7 @@ func runStatus(path string, verbose bool) {
 	defer log.Close()
 	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
 		if err := schedule.EnsureInstalled(cfg, path, log); err != nil {
-			log.Warn(i18n.Tf("log.warn.schedule_ensure", err))
+			log.WarnS(i18n.Tf("log.warn.schedule_ensure", err))
 		}
 	}
 	fmt.Println(i18n.T("section.config"))
@@ -337,7 +415,7 @@ func runStatus(path string, verbose bool) {
 	fmt.Println(i18n.T("section.backups"))
 	files, err := retention.ListBackups(cfg.BackupDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, i18n.Tf("section.backup_dir_error", err)+"\n")
+		fmt.Fprintln(os.Stderr, i18n.Tf("section.backup_dir_error", err))
 	} else if len(files) == 0 {
 		fmt.Println(i18n.T("msg.no_backups"))
 	} else {
@@ -348,12 +426,28 @@ func runStatus(path string, verbose bool) {
 			wKind = 12
 		)
 		var totalSize int64
+		var yearly, monthly, weekly, daily int
+		seen := make(map[string]bool)
 		for _, f := range files {
 			kind := retention.Classify(f.Date)
 			totalSize += f.Size
 			name := filepath.Base(f.Path)
 			if len(name) > wName {
 				name = name[:wName-1] + "…"
+			}
+			dayKey := f.Date.Format("20060102")
+			if !seen[dayKey] { // attention: [] delivers the zero value (in this case false) if the key ist not found!
+				seen[dayKey] = true
+				switch retention.PeriodKey(f.Date) {
+				case "yearly":
+					yearly++
+				case "monthly":
+					monthly++
+				case "weekly":
+					weekly++
+				default:
+					daily++
+				}
 			}
 			fmt.Printf("%-*s %*s %-*s %-*s\n",
 				wDate, f.ModTime.Format("2006-01-02 15:04:05"),
@@ -365,7 +459,51 @@ func runStatus(path string, verbose bool) {
 			wDate, i18n.T("status.summe"),
 			wSize, formatSize(totalSize),
 			wName, i18n.Tf("msg.files_count", len(files)))
+		fmt.Println()
+		fmt.Println(i18n.Tf("status.retention_overview", yearly, monthly, weekly, daily))
 	}
+	printBackupDurations(cfg)
+}
+
+// formatDuration returns a human-readable duration (e.g. "2m 30s" or "45s").
+func formatDuration(sec int) string {
+	if sec < 60 {
+		return fmt.Sprintf("%ds", sec)
+	}
+	m := sec / 60
+	s := sec % 60
+	if s == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	return fmt.Sprintf("%dm %ds", m, s)
+}
+
+// printBackupDurations reads the log file for the last 10 backup durations and prints min, max, average.
+func printBackupDurations(cfg *config.Config) {
+	logPath := getLogPath(cfg)
+	durations, err := lastBackupDurations(logPath, 10)
+	if err != nil || len(durations) == 0 {
+		return
+	}
+	minSec := durations[0]
+	maxSec := durations[0]
+	sum := 0
+	for _, s := range durations {
+		if s < minSec {
+			minSec = s
+		}
+		if s > maxSec {
+			maxSec = s
+		}
+		sum += s
+	}
+	avgSec := sum / len(durations)
+	fmt.Println()
+	fmt.Println(i18n.T("status.section_durations"))
+	fmt.Println(i18n.Tf("status.duration_last_n", len(durations)))
+	fmt.Println(i18n.Tf("status.duration_min", formatDuration(minSec)))
+	fmt.Println(i18n.Tf("status.duration_max", formatDuration(maxSec)))
+	fmt.Println(i18n.Tf("status.duration_avg", formatDuration(avgSec)))
 }
 
 // formatSize formats size: bytes without suffix; 1024*n as "nK", 1024²*n as "nM", 1024³*n as "nT"; one decimal if value < 10, else none.
@@ -452,18 +590,18 @@ func runBackup(path string, verbose bool) {
 	defer log.Close()
 
 	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
-		log.Warn(i18n.T("log.warn.schedule_platform"))
+		log.WarnS(i18n.T("log.warn.schedule_platform"))
 	} else {
 		if err := schedule.EnsureInstalled(cfg, path, log); err != nil {
-			log.Warn(i18n.Tf("log.warn.schedule_ensure", err))
+			log.WarnS(i18n.Tf("log.warn.schedule_ensure", err))
 		}
 	}
 
 	if err := run.Backup(cfg, log); err != nil {
-		log.Error(i18n.Tf("log.error.backup_failed", err))
+		log.ErrorS(i18n.Tf("log.error.backup_failed", err))
 		os.Exit(1)
 	}
-	log.Info(i18n.T("log.msg.backup_ok"))
+	log.InfoS(i18n.T("log.msg.backup_ok"))
 }
 
 func runRestore(path, dateStr string, full bool, verbose bool) {
@@ -515,5 +653,5 @@ func runRestore(path, dateStr string, full bool, verbose bool) {
 		fmt.Fprintf(os.Stderr, i18n.T("error.restore")+"\n", err)
 		os.Exit(1)
 	}
-	log.Info(i18n.T("log.msg.restore_ok"))
+	log.InfoS(i18n.T("log.msg.restore_ok"))
 }

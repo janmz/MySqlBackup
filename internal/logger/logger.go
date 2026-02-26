@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,29 +31,42 @@ func New(path string) (*Logger, error) {
 	return &Logger{f: f, echo: true}, nil
 }
 
-func (l *Logger) write(level, format string, a ...interface{}) {
+func (l *Logger) writeString(level, s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	line := fmt.Sprintf("%s [%s] %s\n", time.Now().Format(time.RFC3339), level, fmt.Sprintf(format, a...))
+	s = strings.TrimSuffix(s, "\n")
+	line := fmt.Sprintf("%s [%s] %s\n", time.Now().Format(time.RFC3339), level, s)
 	_, _ = l.f.WriteString(line)
 	if l.echo {
 		fmt.Print(line)
 	}
 }
 
+func (l *Logger) write(level, format string, a ...interface{}) {
+	l.writeString(level, fmt.Sprintf(format, a...))
+}
+
 // Info logs an info message.
 func (l *Logger) Info(format string, a ...interface{}) { l.write("INFO", format, a...) }
+func (l *Logger) InfoS(s string)                       { l.writeString("INFO", s) }
 
 // Warn logs a warning.
 func (l *Logger) Warn(format string, a ...interface{}) { l.write("WARN", format, a...) }
+func (l *Logger) WarnS(s string)                       { l.writeString("WARN", s) }
 
 // Error logs an error.
 func (l *Logger) Error(format string, a ...interface{}) { l.write("ERROR", format, a...) }
+func (l *Logger) ErrorS(s string)                       { l.writeString("ERROR", s) }
 
 // Debug logs a debug message only when Verbose is true (prefix [DEBUG]).
 func (l *Logger) Debug(format string, a ...interface{}) {
 	if l.Verbose {
 		l.write("DEBUG", format, a...)
+	}
+}
+func (l *Logger) DebugS(s string) {
+	if l.Verbose {
+		l.writeString("DEBUG", s)
 	}
 }
 

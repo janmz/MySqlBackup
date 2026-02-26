@@ -71,6 +71,12 @@
 	"retention.monthly": "mensuel",
 	"retention.yearly": "annuel",
 	"status.summe": "Total :",
+	"status.retention_overview": "Aperçu : %d annuel(s), %d mensuel(s), %d hebdo(s), %d quotidien(s)",
+	"status.section_durations": "=== Durée des sauvegardes (depuis le journal) ===",
+	"status.duration_last_n": "D’après les %d dernières sauvegardes",
+	"status.duration_min": "Plus courte : %s",
+	"status.duration_max": "Plus longue : %s",
+	"status.duration_avg": "Moyenne : %s",
 
 	"job.windows": "Tâche Windows : %s (quotidien à %s)\nCommande : %s --backup -config %s",
 	"job.systemd": "Timer systemd : %s (quotidien à %s)\nCommande : %s --backup -config %s",

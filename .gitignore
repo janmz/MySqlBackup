@@ -22,6 +22,7 @@ config.json
 *.tmp
 *.log
 _debug*
+__debug_bin*
 sconfig.debug.txt
 last_id.txt
 resources.syso

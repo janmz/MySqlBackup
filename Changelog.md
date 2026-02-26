@@ -2,6 +2,71 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.2.0.71] – 2026-02-11
+
+### Behoben
+
+- **Windows Task-Vergleich**: Ausgabe von `schtasks /FO LIST /V` schneidet lange
+  Zeilen ab; der Pfad für `--config` war oft nicht lesbar und der Vergleich
+  stoppte. Die vollständige Befehlszeile (Execute + Arguments) wird nun per
+  PowerShell (`Get-ScheduledTask … .Actions[0]`) ermittelt und für den Abgleich
+  verwendet; übrige Felder (Hostname, Status, Zeitplantyp, Startzeit, Tage)
+  weiterhin aus schtasks.
+
+---
+
+## [1.2.0.70] – 2026-02-11
+
+### Geändert
+
+- **Status Retention-Übersicht**: Jährliche/monatliche/wöchentliche/tägliche
+  Backups werden nach **Tag** gezählt (nicht pro Datei). Pro Periode wird
+  jeder Backup-Tag nur einmal gezählt (Map pro Periode).
+
+---
+
+## [1.2.0.69] – 2026-02-11
+
+### Geändert
+
+- **Backup-Dauer aus Log**: Es wird angenommen, dass Anwendungs- und
+  Logsprache identisch sind; Erkennung von Start- und Ende-Zeilen erfolgt über
+  die gleichen i18n-Texte (T/Tf) wie beim Schreiben.
+
+---
+
+## [1.2.0.68] – 2026-02-11
+
+### Geändert
+
+- **Backup-Dauer aus Log**: Ermittlung erfolgt ohne Anpassung des Logformats.
+  Beginn = Zeit des Eintrags mit header.version/executable/arguments und
+  „[--backup “, Ende = Zeit des Eintrags log.msg.backup_ok. Entfernt:
+  Schreiben von `BACKUP_DURATION_SECONDS=` ins Log.
+
+---
+
+## [1.2.0.67] – 2026-02-11
+
+### Hinzugefügt
+
+- **Status – Backup-Dauer aus Log**: Am Ende von `--status` wird aus der
+  Logdatei ausgelesen, wie lange die letzten 10 Backups gedauert haben; Ausgabe
+  kleinste/größte/mittlere Dauer (de/en/fr/nl).
+
+---
+
+## [1.2.0.66] – 2026-02-11
+
+### Hinzugefügt
+
+- **Status**: Nach der Backup-Tabelle erscheint eine Übersicht mit der Anzahl
+  jährlicher, monatlicher, wöchentlicher und täglicher Backups (de/en/fr/nl).
+  Zählung erfolgt über `retention.PeriodKey` (gleiche Logik wie in der
+  Spalte „Art“).
+
+---
+
 ## [1.1.5.64] – 2026-02-10
 
 ### Geändert

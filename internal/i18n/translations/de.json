@@ -71,6 +71,12 @@
 	"retention.monthly": "monatlichen",
 	"retention.yearly": "jährlichen",
 	"status.summe": "Summe:",
+	"status.retention_overview": "Übersicht: %d jährliche, %d monatliche, %d wöchentliche, %d tägliche Backups",
+	"status.section_durations": "=== Backup-Dauer (aus Log) ===",
+	"status.duration_last_n": "Grundlage: letzte %d Backups",
+	"status.duration_min": "Kleinste Dauer: %s",
+	"status.duration_max": "Größte Dauer: %s",
+	"status.duration_avg": "Mittlere Dauer: %s",
 
 	"job.windows": "Windows Task: %s (täglich um %s)\nBefehl: %s --backup -config %s",
 	"job.systemd": "systemd Timer: %s (täglich um %s)\nBefehl: %s --backup -config %s",

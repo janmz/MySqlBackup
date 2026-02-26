@@ -16,6 +16,21 @@ const backupPrefix = "mysql_backup_"
 
 var dateInFilename = regexp.MustCompile(`mysql_backup_(\d{8})_`)
 
+// PeriodKey returns the retention period for a date as a stable key
+// ("yearly"|"monthly"|"weekly"|"daily") for counting. Same order as Classify.
+func PeriodKey(t time.Time) string {
+	if t.Month() == 12 && t.Day() == 31 {
+		return "yearly"
+	}
+	if isLastDayOfMonth(t) {
+		return "monthly"
+	}
+	if t.Weekday() == time.Sunday {
+		return "weekly"
+	}
+	return "daily"
+}
+
 // Classify returns the retention period for a date as a localized string (e.g. German "täglichen", "wöchentlichen").
 // Order: yearly (31.12) > monthly (last day of month, not 31.12) > weekly (Sunday) > daily (rest).
 func Classify(t time.Time) string {

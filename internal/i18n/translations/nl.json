@@ -71,6 +71,12 @@
 	"retention.monthly": "maandelijkse",
 	"retention.yearly": "jaarlijkse",
 	"status.summe": "Totaal:",
+	"status.retention_overview": "Overzicht: %d jaarlijkse, %d maandelijkse, %d wekelijkse, %d dagelijkse back-ups",
+	"status.section_durations": "=== Back-upduur (uit log) ===",
+	"status.duration_last_n": "Op basis van laatste %d back-ups",
+	"status.duration_min": "Kortste duur: %s",
+	"status.duration_max": "Langste duur: %s",
+	"status.duration_avg": "Gemiddelde duur: %s",
 
 	"job.windows": "Windows-taak: %s (dagelijks om %s)\nOpdracht: %s --backup -config %s",
 	"job.systemd": "systemd-timer: %s (dagelijks om %s)\nOpdracht: %s --backup -config %s",

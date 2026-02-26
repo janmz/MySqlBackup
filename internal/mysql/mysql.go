@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -34,23 +35,36 @@ func (c *Conn) binPath(name string) string {
 	return filepath.Join(c.BinDir, name)
 }
 
-// baseArgs returns common args for mysql/mysqldump (host, port, user, password).
+// baseArgs returns common args for mysql/mysqldump (host, port, user). Password is passed via MYSQL_PWD env in setPassEnv.
 func (c *Conn) baseArgs() []string {
-	args := []string{
+	return []string{
 		"-h", c.Host,
 		"-P", fmt.Sprintf("%d", c.Port),
 		"-u", c.User,
 	}
-	if c.Password != "" {
-		args = append(args, "-p"+c.Password)
+}
+
+// setPassEnv sets cmd.Env so the child process gets MYSQL_PWD (avoids password in process list).
+func (c *Conn) setPassEnv(cmd *exec.Cmd) {
+	if c.Password == "" {
+		return
 	}
-	return args
+	env := os.Environ()
+	var out []string
+	for _, e := range env {
+		if !strings.HasPrefix(e, "MYSQL_PWD=") {
+			out = append(out, e)
+		}
+	}
+	out = append(out, "MYSQL_PWD="+c.Password)
+	cmd.Env = out
 }
 
 // Reachable returns nil if the server accepts connections (e.g. for lifecycle check before start).
 func (c *Conn) Reachable() error {
 	args := append(c.baseArgs(), "-e", "SELECT 1")
 	cmd := exec.Command(c.binPath("mysql"), args...)
+	c.setPassEnv(cmd)
 	cmd.Stdin = nil
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -63,6 +77,7 @@ func (c *Conn) Reachable() error {
 func (c *Conn) IsMariaDB() (bool, error) {
 	args := append(c.baseArgs(), "-e", "SELECT @@version")
 	cmd := exec.Command(c.binPath("mysql"), args...)
+	c.setPassEnv(cmd)
 	cmd.Stdin = nil
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -75,6 +90,7 @@ func (c *Conn) IsMariaDB() (bool, error) {
 func (c *Conn) ListDatabases() ([]string, error) {
 	args := append(c.baseArgs(), "-e", "SHOW DATABASES")
 	cmd := exec.Command(c.binPath("mysql"), args...)
+	c.setPassEnv(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf(i18n.T("err.show_databases"), err, string(out))
@@ -104,6 +120,7 @@ func (c *Conn) ExportUsers(isMariaDB bool) ([]byte, error) {
 	// MySQL: mysqlpump --exclude-databases=% --users
 	args := append(c.baseArgs(), "--exclude-databases=%", "--users")
 	cmd := exec.Command(c.binPath("mysqlpump"), args...)
+	c.setPassEnv(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf(i18n.T("err.mysqlpump_users"), err, string(out))
@@ -116,6 +133,7 @@ func (c *Conn) ExportUsers(isMariaDB bool) ([]byte, error) {
 func (c *Conn) exportUsersMariaDB() ([]byte, error) {
 	args := append(c.baseArgs(), "--system=users")
 	cmd := exec.Command(c.binPath("mysqldump"), args...)
+	c.setPassEnv(cmd)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return out, nil
@@ -135,6 +153,7 @@ func (c *Conn) exportUsersMariaDBFallback() ([]byte, error) {
 	q := "SELECT user, host, plugin, COALESCE(authentication_string,'') FROM mysql.user WHERE user != '' AND user NOT IN ('root','mysql.sys','mysql.session','mariadb.sys')"
 	args := append(c.baseArgs(), "-N", "-e", q)
 	cmd := exec.Command(c.binPath("mysql"), args...)
+	c.setPassEnv(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf(i18n.T("err.mysql_user_list"), err, string(out))
@@ -169,6 +188,7 @@ func (c *Conn) exportUsersMariaDBFallback() ([]byte, error) {
 		showQ := fmt.Sprintf("SHOW GRANTS FOR '%s'@'%s'", userEsc, hostEsc)
 		args := append(c.baseArgs(), "-N", "-e", showQ)
 		cmd := exec.Command(c.binPath("mysql"), args...)
+		c.setPassEnv(cmd)
 		grantOut, err := cmd.CombinedOutput()
 		if err != nil {
 			continue
@@ -203,6 +223,7 @@ func (c *Conn) DumpDatabase(db string, isMariaDB bool, dest io.Writer) error {
 	}
 	args = append(args, "--databases", db)
 	cmd := exec.Command(c.binPath("mysqldump"), args...)
+	c.setPassEnv(cmd)
 	cmd.Stdout = dest
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -216,6 +237,7 @@ func (c *Conn) DumpDatabase(db string, isMariaDB bool, dest io.Writer) error {
 func (c *Conn) ImportSQL(src io.Reader) error {
 	args := c.baseArgs()
 	cmd := exec.Command(c.binPath("mysql"), args...)
+	c.setPassEnv(cmd)
 	cmd.Stdin = src
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

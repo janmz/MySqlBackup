@@ -26,6 +26,18 @@ func hostnameForFile(host string) string {
 	return host
 }
 
+// dbNameForFile returns a safe filename part for backup names (prevents path traversal).
+func dbNameForFile(db string) string {
+	if db == "" {
+		return "db"
+	}
+	db = regexp.MustCompile(`[^\w\-.]`).ReplaceAllString(db, "_")
+	if db == "" {
+		return "db"
+	}
+	return db
+}
+
 // Run performs full backup: export users, parse, for each DB dump+append users+zip.
 // isMariaDB: bei true wird --set-gtid-purged=OFF nicht an mysqldump übergeben (MariaDB kennt die Option nicht).
 func Run(cfg *config.Config, conn *mysql.Conn, userSQL []byte, dbs []string, isMariaDB bool, log interface {
@@ -48,7 +60,8 @@ func Run(cfg *config.Config, conn *mysql.Conn, userSQL []byte, dbs []string, isM
 	}
 
 	for _, db := range dbs {
-		zipName := fmt.Sprintf("mysql_backup_%s_%s_%s.zip", dateStr, hostPart, db)
+		dbPart := dbNameForFile(db)
+		zipName := fmt.Sprintf("mysql_backup_%s_%s_%s.zip", dateStr, hostPart, dbPart)
 		zipPath := filepath.Join(backupDir, zipName)
 		entryWriter, finish, cancel, err := safeWriteZIPStreaming(zipPath, db+".sql", log)
 		if err != nil {

@@ -162,19 +162,20 @@ func Apply(dir string, retainDaily, retainWeekly, retainMonthly, retainYearly in
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	// Cutoff: keep daily backups with date >= today - retainDaily
-	dailyCutoff := today.AddDate(0, 0, -retainDaily)
+	// Cutoff: keep the last retainDaily calendar days (inclusive of today)
+	dailyCutoff := today.AddDate(0, 0, -(retainDaily - 1))
+	if retainDaily <= 0 {
+		dailyCutoff = today.AddDate(0, 0, 1)
+	}
 
 	// Last N Sundays (set of dates to keep for weekly)
 	keepSundays := make(map[string]bool)
-	// Finde den letzten Sonntag (inklusive heute, falls heute Sonntag ist)
 	lastSunday := today
 	for lastSunday.Weekday() != time.Sunday {
 		lastSunday = lastSunday.AddDate(0, 0, -1)
 	}
-	// Gehe jeweils 7 Tage nach vorne, retainWeekly-mal
 	for i := 0; i < retainWeekly; i++ {
-		sunday := lastSunday.AddDate(0, 0, 7*i)
+		sunday := lastSunday.AddDate(0, 0, -7*i)
 		keepSundays[dateKey(sunday)] = true
 		if sunday.Year() < 2000 {
 			break

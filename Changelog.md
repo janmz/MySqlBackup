@@ -2,6 +2,88 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.3.0.78] – 2026-02-26
+
+### Geändert (Sicherheit)
+
+- **MySQL-Passwort:** Übergabe nicht mehr per `-p<Passwort>` in der
+  Befehlszeile (sichtbar in ps/tasklist), sondern über die Umgebungsvariable
+  `MYSQL_PWD` für mysql/mysqldump/mysqlpump (`internal/mysql`: baseArgs ohne
+  -p, setPassEnv setzt Env vor jedem Aufruf).
+
+---
+
+## [1.3.0.77] – 2026-02-26
+
+### Hinzugefügt
+
+- **SSH Host-Key-Prüfung:** Ein Config-Eintrag `remote_ssh_host_key`: Wenn der
+  Wert als Datei lesbar ist, wird er als known_hosts-Datei verwendet; sonst wird
+  er als Inline-Host-Key interpretiert (eine Zeile „key-type base64…“). Ersetzt
+  `InsecureIgnoreHostKey()`.
+
+---
+
+## [1.3.0.76] – 2026-02-26
+
+### Behoben (Sicherheit)
+
+- **Passwort im Log:** Bei `-v`/`--verbose` werden Befehlszeilen mit
+  `runWithDebug` nur noch mit maskierten Passwort-Argumenten geloggt
+  (`-p***`, `--password=***`); `redactArgsForLog` in schedule.go.
+- **Path-Traversal über DB-Namen:** Datenbanknamen werden für Backup-Dateinamen
+  mit `dbNameForFile` sanitisiert (analog `hostnameForFile`); nur erlaubte
+  Zeichen `\w`, `-`, `.`.
+
+### Hinzugefügt
+
+- **Config-Validierung:** Maximale Config-Dateigröße 10 KiB; bei Überschreitung
+  Fehler beim Laden. `config.Validate(cfg)` prüft Ports (1024–65535), Retain
+  (1–364), StartTime (00:00–23:59) und gibt Warnungen ins Log aus (nach
+  Start).
+
+---
+
+## [1.3.0.75] – 2026-02-26
+
+### Hinzugefügt
+
+- **Sicherheitsaudit:** Vollständiger Sicherheitsbericht in `securityreport.md`
+  (Scope, sensible Daten, Config- und Pfadvalidierung, Dateizugriffe, externe
+  Aufrufe, Fehlerbehandlung, Abhängigkeiten, Windows/UNC, Datenschutz/GDPR).
+  govulncheck ohne Fund; konkrete Befunde und Empfehlungen priorisiert
+  dokumentiert.
+
+---
+
+## [1.3.0.74] – 2026-02-10
+
+### Behoben
+
+- **Retention wöchentlich**: Die „letzten N Sonntage“ wurden fälschlich in die
+  Zukunft berechnet (+7*i statt -7*i); dadurch wurden ältere Sonntags-Backups
+  gelöscht. Es werden jetzt die letzten N Sonntage rückwärts gezählt.
+- **Retention täglich**: „retain_daily 14“ behält jetzt exakt die letzten 14
+  Kalendertage (inkl. heute), nicht 15.
+- **Status-Zählung**: Hinweis ergänzt, dass jeder Backup-Tag nur in einer
+  Kategorie zählt (Sonntage = wöchentlich); damit ist 13 täglich + 1 wöchentlich
+  = 14 Tage mit Backups korrekt dargestellt.
+
+---
+
+## [1.3.0.73] – 2026-02-10
+
+### Behoben
+
+- **Windows Task / UNC-Pfade**: Umwandlung von Laufwerkspfaden (z. B. N:\\) in
+  UNC-Pfade (z. B. \\\\elias\\Daten\\) vor dem Anlegen des geplanten Tasks
+  funktioniert jetzt zuverlässig: Laufwerk wird großgeschrieben, Fallback auf
+  Format „N:\\“ für WNetGetConnectionW; wenn die API fehlschlägt (z. B. andere
+  Anmeldesitzung), wird ein PowerShell-Fallback per WMI
+  (Win32_LogicalDisk.ProviderName) verwendet.
+
+---
+
 ## [1.2.0.71] – 2026-02-11
 
 ### Behoben

@@ -21,6 +21,7 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 const (
@@ -229,7 +230,39 @@ func streamEncryptUpload(src io.Reader, dst io.Writer, password string) error {
 	return err
 }
 
+// hostKeyCallback returns a HostKeyCallback from cfg.remote_ssh_host_key:
+// if the value is a path to a readable file, use it as known_hosts; otherwise treat as inline key.
+func hostKeyCallback(cfg *config.Config) (ssh.HostKeyCallback, error) {
+	s := strings.TrimSpace(cfg.RemoteSSHHostKey)
+	if s == "" {
+		return nil, fmt.Errorf(i18n.T("err.ssh_host_key_required"))
+	}
+	path := filepath.FromSlash(s)
+	if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() {
+		cb, err := knownhosts.New(path)
+		if err != nil {
+			return nil, fmt.Errorf(i18n.T("err.ssh_host_key_file"), err)
+		}
+		return cb, nil
+	}
+	// Not a readable file: treat as inline key "key-type base64..." or "hostname key-type base64..."
+	parts := strings.Fields(s)
+	if len(parts) < 2 {
+		return nil, fmt.Errorf(i18n.T("err.ssh_host_key_invalid"))
+	}
+	keyLine := strings.Join(parts[len(parts)-2:], " ")
+	pubKey, err := ssh.ParsePublicKey([]byte(keyLine))
+	if err != nil {
+		return nil, fmt.Errorf(i18n.T("err.ssh_host_key_parse"), err)
+	}
+	return ssh.FixedHostKey(pubKey), nil
+}
+
 func dial(cfg *config.Config) (*ssh.Client, error) {
+	hostKeyCB, err := hostKeyCallback(cfg)
+	if err != nil {
+		return nil, err
+	}
 	var auth []ssh.AuthMethod
 	if cfg.RemoteSSHKeyFile != "" {
 		keyPath := filepath.FromSlash(cfg.RemoteSSHKeyFile)
@@ -257,7 +290,7 @@ func dial(cfg *config.Config) (*ssh.Client, error) {
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.RemoteSSHUser,
 		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCB,
 	}
 	return ssh.Dial("tcp", addr, sshConfig)
 }

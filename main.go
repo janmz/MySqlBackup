@@ -5,9 +5,10 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.3.0.72 (in version.go zu ändern)
+// Version: 1.3.1.79 (in version.go zu ändern)
 //
 // ChangeLog:
+// 26.02.26	1.3.1	Fixed: remove critical logs and parametersand enforced ssh host key usage according to results of security audit
 // 26.02.26	1.3.0	Fixed: checking of existing windows tasks, Feature: Overview of backups by classes and calculating average backup time
 // 11.02.26	1.2.0	Feature: included an way to fully restore a database
 // 09.02.26	1.1.5	Fixed: Quotes for task scheduler arguments corrected
@@ -222,6 +223,9 @@ func loadConfigAndLog(path string, verbose bool) (*config.Config, *logger.Logger
 	}
 	log.Verbose = verbose
 	logStartup(log)
+	for _, msg := range config.Validate(cfg) {
+		log.WarnS(msg)
+	}
 	return cfg, log, nil
 }
 
@@ -461,6 +465,7 @@ func runStatus(path string, verbose bool) {
 			wName, i18n.Tf("msg.files_count", len(files)))
 		fmt.Println()
 		fmt.Println(i18n.Tf("status.retention_overview", yearly, monthly, weekly, daily))
+		fmt.Println(i18n.T("status.retention_hint"))
 	}
 	printBackupDurations(cfg)
 }

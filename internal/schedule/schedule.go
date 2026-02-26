@@ -30,10 +30,42 @@ const (
 // systemCrontabPaths: tried in order when crontab executable is not available (e.g. Synology).
 var systemCrontabPaths = []string{"/etc/crontab", "/usr/etc/crontab"}
 
+// redactArgsForLog returns a copy of args with password-bearing arguments masked (e.g. -pXXX -> -p***).
+func redactArgsForLog(args []string) []string {
+	out := make([]string, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "-p" && i+1 < len(args) {
+			out[i] = "-p"
+			out[i+1] = "***"
+			i++
+			continue
+		}
+		if len(a) > 2 && a[:2] == "-p" {
+			out[i] = "-p***"
+			continue
+		}
+		if strings.HasPrefix(a, "--password=") {
+			out[i] = "--password=***"
+			continue
+		}
+		if a == "--password" && i+1 < len(args) {
+			out[i] = "--password"
+			out[i+1] = "***"
+			i++
+			continue
+		}
+		out[i] = a
+	}
+	return out
+}
+
 // runWithDebug runs cmd via CombinedOutput; when log.Verbose, logs command and output with [DEBUG].
+// Password-bearing args are redacted before logging.
 func runWithDebug(log *logger.Logger, cmd *exec.Cmd) ([]byte, error) {
 	if log != nil && log.Verbose {
-		log.Debug("exec: %s %v", cmd.Path, cmd.Args)
+		safeArgs := redactArgsForLog(cmd.Args)
+		log.Debug("exec: %s %v", cmd.Path, safeArgs)
 	}
 	out, err := cmd.CombinedOutput()
 	if log != nil && log.Verbose {

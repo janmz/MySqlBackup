@@ -52,7 +52,8 @@ type Config struct {
 	RemoteSSHUser           string `json:"remote_ssh_user"`
 	RemoteSSHPassword       string `json:"remote_ssh_password"`
 	RemoteSSHSecurePassword string `json:"remote_ssh_secure_password"`
-	RemoteSSHKeyFile        string `json:"remote_ssh_key_file"`
+	RemoteSSHKeyFile   string `json:"remote_ssh_key_file"`
+	RemoteSSHHostKey   string `json:"remote_ssh_host_key"` // path to known_hosts (or file with host key line) OR inline key "key-type base64..."
 
 	// Optional: Remote-Dateien vor Upload mit AES-256 verschlüsseln. Schlüssel aus remote_aes_password abgeleitet.
 	// Wenn entschlüsselter Wert "" ist, erfolgt keine Verschlüsselung.
@@ -76,9 +77,15 @@ func DefaultConfig() *Config {
 	}
 }
 
+const maxConfigSize = 10 * 1024 // 10 KiB
+
 // Load reads config from path via sconfig (JSON + secure passwords), then normalizes paths.
-// If cleanConfig is true, sconfig writes the file back with plaintext passwords (for migration/inspection).
+// Config file must not exceed 10 KiB. If cleanConfig is true, sconfig writes the file back with plaintext passwords (for migration/inspection).
 func Load(path string, cleanConfig bool) (*Config, error) {
+	fi, err := os.Stat(path)
+	if err == nil && fi.Size() > maxConfigSize {
+		return nil, fmt.Errorf(i18n.T("err.config_too_large"), fi.Size(), maxConfigSize)
+	}
 
 	var debugSconfig bool = false
 
@@ -96,6 +103,53 @@ func Load(path string, cleanConfig bool) (*Config, error) {
 	}
 	cfg.normalizePaths()
 	return cfg, nil
+}
+
+// Validate returns warnings for config values outside recommended bounds (ports 1024–65535, retain 1–364, start_time 00:00–23:59).
+func Validate(cfg *Config) []string {
+	var w []string
+	// Ports: > 1023 and < 65536
+	if cfg.MySQLPort <= 1023 || cfg.MySQLPort >= 65536 {
+		w = append(w, i18n.Tf("config.warn.port_range", "mysql_port", cfg.MySQLPort, 1024, 65535))
+	}
+	if cfg.AdminSMTPPort != 0 && (cfg.AdminSMTPPort <= 1023 || cfg.AdminSMTPPort >= 65536) {
+		w = append(w, i18n.Tf("config.warn.port_range", "admin_smtp_port", cfg.AdminSMTPPort, 1024, 65535))
+	}
+	if cfg.RemoteSSHPort != 0 && (cfg.RemoteSSHPort <= 1023 || cfg.RemoteSSHPort >= 65536) {
+		w = append(w, i18n.Tf("config.warn.port_range", "remote_ssh_port", cfg.RemoteSSHPort, 1024, 65535))
+	}
+	// Retain: > 0 and < 365
+	if cfg.RetainDaily <= 0 || cfg.RetainDaily >= 365 {
+		w = append(w, i18n.Tf("config.warn.retain_range", "retain_daily", cfg.RetainDaily, 1, 364))
+	}
+	if cfg.RetainWeekly <= 0 || cfg.RetainWeekly >= 365 {
+		w = append(w, i18n.Tf("config.warn.retain_range", "retain_weekly", cfg.RetainWeekly, 1, 364))
+	}
+	if cfg.RetainMonthly <= 0 || cfg.RetainMonthly >= 365 {
+		w = append(w, i18n.Tf("config.warn.retain_range", "retain_monthly", cfg.RetainMonthly, 1, 364))
+	}
+	if cfg.RetainYearly <= 0 || cfg.RetainYearly >= 365 {
+		w = append(w, i18n.Tf("config.warn.retain_range", "retain_yearly", cfg.RetainYearly, 1, 364))
+	}
+	// StartTime: 00:00–23:59
+	st := strings.TrimSpace(cfg.StartTime)
+	if len(st) == 5 && st[2] == ':' {
+		var hour, min int
+		if _, err := fmt.Sscanf(st[:2], "%d", &hour); err == nil {
+			if _, err := fmt.Sscanf(st[3:5], "%d", &min); err == nil {
+				if hour < 0 || hour > 23 || min < 0 || min > 59 {
+					w = append(w, i18n.T("config.warn.start_time"))
+				}
+			} else {
+				w = append(w, i18n.T("config.warn.start_time"))
+			}
+		} else {
+			w = append(w, i18n.T("config.warn.start_time"))
+		}
+	} else if st != "" {
+		w = append(w, i18n.T("config.warn.start_time"))
+	}
+	return w
 }
 
 func (c *Config) normalizePaths() {

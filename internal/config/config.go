@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/janmz/mysqlbackup/internal/i18n"
-	"github.com/janmz/sconfig"
+	"github.com/janmz/sconfig/v2"
 )
 
 // Config holds all settings for MySQL backup (JSON with sconfig secure password pairs).
@@ -52,8 +52,9 @@ type Config struct {
 	RemoteSSHUser           string `json:"remote_ssh_user"`
 	RemoteSSHPassword       string `json:"remote_ssh_password"`
 	RemoteSSHSecurePassword string `json:"remote_ssh_secure_password"`
-	RemoteSSHKeyFile   string `json:"remote_ssh_key_file"`
-	RemoteSSHHostKey   string `json:"remote_ssh_host_key"` // path to known_hosts (or file with host key line) OR inline key "key-type base64..."
+	RemoteSSHKeyFile         string `json:"remote_ssh_key_file"`
+	RemoteSSHHostKey         string `json:"remote_ssh_host_key"`         // path to known_hosts (or file with host key line) OR inline key "key-type base64..."
+	RemoteSSHTimeoutSeconds  int    `json:"remote_ssh_timeout_seconds"`  // dial timeout in seconds; 0 = library default (30s)
 
 	// Optional: Remote-Dateien vor Upload mit AES-256 verschlüsseln. Schlüssel aus remote_aes_password abgeleitet.
 	// Wenn entschlüsselter Wert "" ist, erfolgt keine Verschlüsselung.
@@ -117,6 +118,9 @@ func Validate(cfg *Config) []string {
 	}
 	if cfg.RemoteSSHPort != 0 && (cfg.RemoteSSHPort < 1 || cfg.RemoteSSHPort > 65535) {
 		w = append(w, i18n.Tf("config.warn.port_range", "remote_ssh_port", cfg.RemoteSSHPort, 1, 65535))
+	}
+	if cfg.RemoteSSHTimeoutSeconds < 0 || cfg.RemoteSSHTimeoutSeconds > 3600 {
+		w = append(w, i18n.Tf("config.warn.ssh_timeout_range", cfg.RemoteSSHTimeoutSeconds))
 	}
 	// Retain: > 0 and < 365
 	if cfg.RetainDaily <= 0 || cfg.RetainDaily >= 365 {
@@ -233,4 +237,41 @@ func ConfigPath(flagPath string, invokedDir string) string {
 		return filepath.Join(home, name)
 	}
 	return name
+}
+
+// UpdateRemoteSSHHostKey adds the new key to remote_ssh_host_key. If current is a path to a
+// regular file, the new key line is prepended to that file; otherwise the config is written
+// via sconfig.UpdateConfig (cfg must have been loaded with Load first): new key only if
+// current is empty, else newKey + " || " + current.
+func UpdateRemoteSSHHostKey(cfg *Config, configPath, newKeyLine string) error {
+	current := strings.TrimSpace(cfg.RemoteSSHHostKey)
+	newKeyLine = strings.TrimSpace(newKeyLine)
+	if newKeyLine == "" {
+		return fmt.Errorf("%s", i18n.T("err.setup_ssh_empty_key"))
+	}
+	filePath := filepath.FromSlash(strings.TrimSpace(current))
+	if filePath != "" {
+		if fi, err := os.Stat(filePath); err == nil && fi.Mode().IsRegular() {
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				return fmt.Errorf(i18n.T("err.setup_ssh_read_file"), err)
+			}
+			newContent := newKeyLine + "\n" + string(content)
+			if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf(i18n.T("err.setup_ssh_write_file"), err)
+			}
+			return nil
+		}
+	}
+	var newValue string
+	if current == "" {
+		newValue = newKeyLine
+	} else {
+		newValue = newKeyLine + " || " + current
+	}
+	cfg.RemoteSSHHostKey = newValue
+	if err := sconfig.UpdateConfig(cfg, configPath); err != nil {
+		return fmt.Errorf(i18n.T("err.setup_ssh_write_config"), err)
+	}
+	return nil
 }

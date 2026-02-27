@@ -45,13 +45,14 @@ Kopiere `config.example.json` nach `config.json` und setze:
 | `log_filename` | Log-Datei (Standard: `backup_dir/mysqlbackup.log`) |
 | `admin_email`, `admin_smtp_*` | E-Mail und SMTP für Fehlermeldungen. `admin_smtp_user`: optionaler Login (sonst = admin_email). `admin_smtp_tls`: `"tls"` (Port 465), `"starttls"` (Port 587), `""` = Auto |
 | `remote_backup_dir`, `remote_ssh_*` | Optionales SFTP-Remote-Backup. |
-| `remote_ssh_host_key` | **Pflicht bei Remote.** Pfad zu known_hosts-Datei oder Inline-Key-Zeile(n). Mehrere Keys: mit doppeltem senkrechtem Strich trennen. Bei Mismatch zeigt das Log den Server-Key zum Eintragen. |
+| `remote_ssh_host_key` | **Pflicht bei Remote.** Pfad zu known_hosts-Datei oder Inline-Key-Zeile(n). Mehrere Keys: mit doppeltem senkrechtem Strich trennen. Mit `--setup-ssh` den Server-Key holen und eintragen (Duplikate werden übersprungen). Bei Mismatch zeigt das Log den Server-Key zum Eintragen. |
+| `remote_ssh_timeout_seconds` | SSH-Dial-Timeout in Sekunden; 0 = Bibliothek-Standard (30 s). Gültig 0–3600. |
 | `start_time` | Tägliche Startzeit (HH:MM, 00:00–23:59, Standard 22:00) für den Zeitplan |
 
 **Config-Validierung (nur Warnungen):** Config-Datei max. 10 KiB. Ports
 (mysql_port, admin_smtp_port, remote_ssh_port) empfohlen 1–65535;
-retain_* 1–364; start_time HH:MM. Ungültige Werte werden dennoch verwendet,
-es erscheint eine Warnung im Log.
+retain_* 1–364; remote_ssh_timeout_seconds 0–3600; start_time HH:MM.
+Ungültige Werte werden dennoch verwendet, es erscheint eine Warnung im Log.
 
 Die Config-Datei wird gesucht in: `-config`-Pfad, dann aktuellem Verzeichnis
 (`config.json`), dann Benutzer-Home.
@@ -91,6 +92,10 @@ mysqlbackup --cleanconfig
 
 # Backup-Datei(en) von Remote (Dateiname oder Wildcards, keine Pfadkomponenten)
 mysqlbackup --getfile "mysql_backup_*.zip"
+
+# SSH-Host-Key vom Server holen und in remote_ssh_host_key eintragen (nur Testverbindung)
+mysqlbackup --setup-ssh
+mysqlbackup --setup-ssh -config /pfad/zur/config.json
 ```
 
 ## Wiederherstellung

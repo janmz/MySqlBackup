@@ -45,13 +45,14 @@ Copy `config.example.json` to `config.json` and set:
 | `log_filename` | Log file path (default: `backup_dir/mysqlbackup.log`) |
 | `admin_email`, `admin_smtp_*` | Error notification email and SMTP. `admin_smtp_tls`: `"tls"` (port 465, implicit TLS), `"starttls"` (port 587), `""` = auto |
 | `remote_backup_dir`, `remote_ssh_*` | Optional SFTP remote backup. |
-| `remote_ssh_host_key` | **Mandatory if using remote.** Path to known_hosts file or inline key line(s). Multiple keys: separate with double vertical bar. On mismatch the log shows the server key to add. |
+| `remote_ssh_host_key` | **Mandatory if using remote.** Path to known_hosts file or inline key line(s). Multiple keys: separate with double vertical bar. Use `--setup-ssh` to fetch the server key and add it (duplicates are skipped). On mismatch the log shows the server key to add. |
+| `remote_ssh_timeout_seconds` | SSH dial timeout in seconds; 0 = library default (30 s). Valid 0–3600. |
 | `start_time` | Daily run time (HH:MM, 00:00–23:59, default 22:00) for schedule |
 
 **Config validation (warnings only):** Config file max 10 KiB. Ports
 (mysql_port, admin_smtp_port, remote_ssh_port) recommended 1–65535;
-retain_* 1–364; start_time HH:MM. Invalid values are still used but a
-warning is logged.
+retain_* 1–364; remote_ssh_timeout_seconds 0–3600; start_time HH:MM.
+Invalid values are still used but a warning is logged.
 
 Config file is looked up in: `-config` path, then current directory
 (`config.json`), then user home.
@@ -91,6 +92,10 @@ mysqlbackup --cleanconfig
 
 # Download backup file(s) from remote (filename or wildcards, no path components)
 mysqlbackup --getfile "mysql_backup_*.zip"
+
+# Fetch SSH host key from server and add to remote_ssh_host_key (test connection only)
+mysqlbackup --setup-ssh
+mysqlbackup --setup-ssh -config /path/to/config.json
 ```
 
 ## Restore

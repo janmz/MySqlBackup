@@ -2,6 +2,64 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.3.5.91] – 2026-02-27
+
+### Hinzugefügt
+
+- **SSH-Timeout:** Neue Config-Option `remote_ssh_timeout_seconds` (Sekunden).
+  Steuert das Timeout für die SSH-Verbindung (Dial). 0 = Bibliothek-Standard
+  (30 s), gültig 0–3600. Wird an `github.com/janmz/sshcommands` übergeben.
+
+### Geändert
+
+- **sshcommands:** Bibliothek nutzt nun `net.DialTimeout`; Timeout über
+  `Opts.Timeout` (0 = 30 s). Prüfung: Anwendung baut weiterhin mit
+  sshcommands-Wrapper.
+
+---
+
+## [1.3.5.90] – 2026-02-27
+
+### Geändert
+
+- **Remote/SFTP:** SSH-/SFTP-Funktionen (Sync, GetFile, Host-Key) nutzen nun
+  die externe Bibliothek `github.com/janmz/sshcommands`. `internal/remote` ist
+  nur noch eine Wrapper-Schicht (Config → Parameter → Aufruf der Bibliothek).
+  Lokale Entwicklung: `replace github.com/janmz/sshcommands => ../sshcommands`
+  in go.mod; für Build ohne Replace das Repository
+  [github.com/janmz/sshcommands](https://github.com/janmz/sshcommands)
+  verwenden.
+
+---
+
+## [1.3.5.89] – 2026-02-27
+
+### Geändert
+
+- **Config-Schreiben bei `-setup-ssh`:** Das Aktualisieren von
+  `remote_ssh_host_key` in der JSON-Config erfolgt nun über
+  `sconfig.UpdateConfig` statt manuelles JSON-Lesen/-Schreiben. Sichere
+  Felder (Passwörter) bleiben dabei verschlüsselt. Abhängigkeit:
+  `github.com/janmz/sconfig/v2` v2.0.1.
+
+---
+
+## [1.3.5.88] – 2026-02-27
+
+### Hinzugefügt
+
+- **Parameter `-setup-ssh`:** Holt den SSH-Host-Key vom Remote-Server (nur
+  Testverbindung), trägt ihn in `remote_ssh_host_key` ein und beendet das
+  Programm. Wenn `remote_ssh_host_key` ein Dateipfad ist, wird der neue Key
+  am Anfang der Datei eingetragen; bei Inline-Keys wird der neue Key mit
+  `||` getrennt vor die bestehenden gesetzt; wenn noch kein Key gesetzt ist,
+  wird er als einziger eingetragen. Im Log wird vermerkt, ob die Verbindung
+  erfolgreich war und ob ein neuer Key gefunden bzw. eingetragen wurde.
+  Ein bereits vorhandener Key (Vergleich per Key-Inhalt) wird nicht erneut
+  eingetragen; in diesem Fall wird „Host-Key ist bereits eingetragen“ geloggt.
+
+---
+
 ## [1.3.2.85] – 2026-02-27
 
 ### Behoben

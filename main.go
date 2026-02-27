@@ -5,12 +5,10 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.3.4.87 (in version.go zu ändern)
+// Version: 1.3.6.92 (in version.go zu ändern)
 //
 // ChangeLog:
-// 27.02.26	1.3.4	Fixed: warning about non constant format string
-// 27.02.26	1.3.3	Fixed: broken log output if accounts include % character
-// 27.02.26	1.3.2	Fixed: documentation, matching of ssh keys
+// 27.02.26	1.3.6	Fixed: refactored the ssh handling to separate package!
 // 26.02.26	1.3.1	Fixed: remove critical logs and parametersand enforced ssh host key usage according to results of security audit
 // 26.02.26	1.3.0	Fixed: checking of existing windows tasks, Feature: Overview of backups by classes and calculating average backup time
 // 11.02.26	1.2.0	Feature: included an way to fully restore a database
@@ -53,6 +51,7 @@ func main() {
 	doRestore := flag.Bool("restore", false, "Restore aus letztem Backup oder letztem vor optionalem Datum YYYYMMDD")
 	doRestoreFull := flag.Bool("restorefull", false, "Full-Restore: data->data.old, Instanz-backup nach data, dann Import (optional YYYYMMDD)")
 	getFile := flag.String("getfile", "", "Datei von Remote laden (ZIP-Backup-Dateiname)")
+	doSetupSSH := flag.Bool("setup-ssh", false, "SSH-Host-Key vom Server holen und in remote_ssh_host_key eintragen; nur Testverbindung, dann Ende")
 	flag.Usage = printUsage
 	flag.Parse()
 	verbose := *doVerbose || *doVerboseLong
@@ -92,6 +91,9 @@ func main() {
 		n++
 	}
 	if *getFile != "" {
+		n++
+	}
+	if *doSetupSSH {
 		n++
 	}
 	args := flag.Args()
@@ -148,6 +150,9 @@ func main() {
 	case *getFile != "":
 		runGetfile(path, *getFile, verbose)
 		return
+	case *doSetupSSH:
+		runSetupSSH(path, verbose)
+		return
 	}
 }
 
@@ -197,6 +202,8 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.getfile"))
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.getfile_desc"))
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.getfile_wildcards"))
+	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.setup_ssh"))
+	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.setup_ssh_desc"))
 	fmt.Fprintf(os.Stderr, "  %s\n", i18n.T("usage.help"))
 	fmt.Fprintf(os.Stderr, "      %s\n", i18n.T("usage.help_desc"))
 }
@@ -566,6 +573,45 @@ func runGetfile(path, filename string, verbose bool) {
 	for _, p := range saved {
 		fmt.Println(i18n.Tf("msg.saved", p))
 	}
+}
+
+func runSetupSSH(path string, verbose bool) {
+	printStartupHeader(path)
+	cfg, log, err := loadConfigAndLog(path, verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, i18n.T("error.config")+"\n", err)
+		os.Exit(1)
+	}
+	defer log.Close()
+	if cfg.RemoteSSHHost == "" {
+		log.ErrorS(i18n.T("err.remote_not_configured"))
+		fmt.Fprintln(os.Stderr, i18n.T("err.remote_not_configured"))
+		os.Exit(1)
+	}
+	keyLine, err := remote.FetchServerHostKey(cfg)
+	if err != nil {
+		log.WarnS(i18n.Tf("log.msg.setup_ssh_connection_failed", err))
+		fmt.Fprintln(os.Stderr, i18n.Tf("log.msg.setup_ssh_connection_failed", err))
+		os.Exit(1)
+	}
+	log.InfoS(i18n.T("log.msg.setup_ssh_connection_ok"))
+	log.InfoS(i18n.T("log.msg.setup_ssh_key_found"))
+	alreadyPresent, err := remote.HostKeyAlreadyPresent(cfg.RemoteSSHHostKey, keyLine)
+	if err != nil {
+		log.WarnS(i18n.Tf("log.msg.setup_ssh_update_failed", err))
+		fmt.Fprintln(os.Stderr, i18n.Tf("log.msg.setup_ssh_update_failed", err))
+		os.Exit(1)
+	}
+	if alreadyPresent {
+		log.InfoS(i18n.T("log.msg.setup_ssh_key_already_present"))
+		return
+	}
+	if err := config.UpdateRemoteSSHHostKey(cfg, path, keyLine); err != nil {
+		log.WarnS(i18n.Tf("log.msg.setup_ssh_update_failed", err))
+		fmt.Fprintln(os.Stderr, i18n.Tf("log.msg.setup_ssh_update_failed", err))
+		os.Exit(1)
+	}
+	log.InfoS(i18n.T("log.msg.setup_ssh_updated"))
 }
 
 // validGetfilePattern ensures the argument has no path components (no /, \, ..).

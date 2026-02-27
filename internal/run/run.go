@@ -3,6 +3,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -29,7 +30,7 @@ func Backup(cfg *config.Config, log *logger.Logger) error {
 	backupDir := filepath.FromSlash(cfg.BackupDir)
 	avail, err := disk.Available(backupDir)
 	if err != nil {
-		log.Warn(i18n.Tf("log.warn.disk_check", err))
+		log.WarnS(i18n.Tf("log.warn.disk_check", err))
 	} else if avail < disk.MinFreeBytes {
 		err := fmt.Errorf(i18n.T("err.disk_space"), avail, disk.MinFreeBytes)
 		sendErrorEmail(cfg, log, i18n.T("email.subject.disk"), err.Error(), nil)
@@ -45,24 +46,32 @@ func Backup(cfg *config.Config, log *logger.Logger) error {
 	}
 
 	weStartedMySQL := false
+	defer func() {
+		if weStartedMySQL && cfg.MySQLAutoStartStop && cfg.MySQLStopCmd != "" {
+			log.InfoS(i18n.Tf("log.msg.mysql_stopping", cfg.MySQLStopCmd))
+			if err := runMySQLLifecycleCmd(cfg.MySQLStopCmd, log, true); err != nil {
+				log.WarnS(i18n.Tf("log.warn.mysql_stop", err))
+			}
+		}
+	}()
 	if cfg.MySQLAutoStartStop && cfg.MySQLStartCmd != "" && cfg.MySQLStopCmd != "" {
 		if err := conn.Reachable(); err != nil {
 			// Fallback: Wenn Port 3306 offen ist, läuft MySQL evtl. schon (z. B. mysql-CLI nicht im PATH).
 			// Dann nicht starten (Port schon belegt → Start würde fehlschlagen).
 			if portReachable(conn.Host, conn.Port) {
-				log.Info(i18n.Tf("log.msg.mysql_port_skip", conn.Host, conn.Port))
+				log.InfoS(i18n.Tf("log.msg.mysql_port_skip", conn.Host, conn.Port))
 			} else {
-				log.Info(i18n.Tf("log.msg.mysql_starting", cfg.MySQLStartCmd))
+				log.InfoS(i18n.Tf("log.msg.mysql_starting", cfg.MySQLStartCmd))
 				if err := runMySQLLifecycleCmd(cfg.MySQLStartCmd, log, false); err != nil {
 					sendErrorEmail(cfg, log, i18n.T("email.subject.mysql_start"), err.Error(), nil)
 					return fmt.Errorf(i18n.T("err.mysql_start"), err)
 				}
 				if !waitForMySQL(conn, 60*time.Second, 2*time.Second) {
 					sendErrorEmail(cfg, log, i18n.T("email.subject.mysql_timeout"), i18n.T("email.body.mysql_timeout"), nil)
-					return fmt.Errorf(i18n.T("err.mysql_timeout"))
+					return errors.New(i18n.T("err.mysql_timeout")) // attention: errors.New returns a new error with the given error message
 				}
 				weStartedMySQL = true
-				log.Info(i18n.T("log.msg.mysql_started"))
+				log.InfoS(i18n.T("log.msg.mysql_started"))
 			}
 		}
 	}
@@ -79,14 +88,14 @@ func Backup(cfg *config.Config, log *logger.Logger) error {
 		return fmt.Errorf(i18n.T("err.list_databases"), err)
 	}
 	if len(dbs) == 0 {
-		log.Info(i18n.T("log.msg.no_user_dbs"))
+		log.InfoS(i18n.T("log.msg.no_user_dbs"))
 		return nil
 	}
 
 	userSQL, err := conn.ExportUsers(isMariaDB)
 	if err != nil {
 		// Fallback for MySQL without mysqlpump: skip user export, only dump DBs
-		log.Warn(i18n.Tf("log.warn.export_users", err))
+		log.WarnS(i18n.Tf("log.warn.export_users", err))
 		userSQL = []byte{}
 	}
 
@@ -97,19 +106,12 @@ func Backup(cfg *config.Config, log *logger.Logger) error {
 	}
 
 	if err := retention.ApplyToDirs(cfg.BackupDir, cfg.RemoteBackupDir, cfg.RetainDaily, cfg.RetainWeekly, cfg.RetainMonthly, cfg.RetainYearly, log); err != nil {
-		log.Warn(i18n.Tf("log.warn.retention", err))
+		log.WarnS(i18n.Tf("log.warn.retention", err))
 	}
 
 	if err := remote.Sync(cfg, cfg.BackupDir, log); err != nil {
 		sendErrorEmail(cfg, log, i18n.T("email.subject.remote"), err.Error(), nil)
 		return fmt.Errorf(i18n.T("err.remote_sync"), err)
-	}
-
-	if weStartedMySQL && cfg.MySQLAutoStartStop && cfg.MySQLStopCmd != "" {
-		log.Info(i18n.Tf("log.msg.mysql_stopping", cfg.MySQLStopCmd))
-		if err := runMySQLLifecycleCmd(cfg.MySQLStopCmd, log, true); err != nil {
-			log.Warn(i18n.Tf("log.warn.mysql_stop", err))
-		}
 	}
 
 	return nil
@@ -160,7 +162,7 @@ func runMySQLLifecycleCmd(cmd string, log *logger.Logger, waitForExit bool) erro
 		}
 		// Don't Wait(); daemon keeps running. Release the process so it can outlive us.
 		_ = c.Process.Release()
-		log.Info(i18n.T("log.msg.mysql_start_background"))
+		log.InfoS(i18n.T("log.msg.mysql_start_background"))
 		return nil
 	}
 
@@ -186,7 +188,7 @@ func runMySQLLifecycleCmd(cmd string, log *logger.Logger, waitForExit bool) erro
 		return fmt.Errorf("%w (output: %s)", err, msg) // msg already from command output
 	}
 	if len(out) > 0 {
-		log.Info(i18n.Tf("log.msg.mysql_lifecycle", string(out)))
+		log.InfoS(i18n.Tf("log.msg.mysql_lifecycle", string(out)))
 	}
 	return nil
 }
@@ -248,7 +250,7 @@ func sendErrorEmail(cfg *config.Config, log *logger.Logger, subject, errDetail s
 	}
 	body := email.FormatErrorBody(subject, errDetail, excerpt)
 	if err := email.Send(cfg, subject, body); err != nil {
-		log.Warn(i18n.Tf("log.warn.email", err))
+		log.WarnS(i18n.Tf("log.warn.email", err))
 	}
 }
 

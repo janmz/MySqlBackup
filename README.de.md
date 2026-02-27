@@ -23,6 +23,10 @@ per SFTP und Fehler-E-Mail. Konfiguration über
 - **Automatische Einrichtung des Zeitplans** beim ersten Lauf: Windows Task
   Scheduler oder Linux systemd-Timer (kein separates Install-Kommando nötig).
 - Plattformunabhängig: Windows und Linux (Pfade und Zeitplan passen sich an).
+- Wurde MySQL für das Backup automatisch gestartet, wird es beim Beenden immer
+  wieder gestoppt (auch bei Fehlern). Beim Aufruf als Debug-Binary (z. B.
+  `__debug_bin.exe`) erstellt/aktualisiert der Schedule-Init den Windows-Task
+  nicht (damit der Task nicht überschrieben wird).
 
 ## Konfiguration
 
@@ -40,8 +44,14 @@ Kopiere `config.example.json` nach `config.json` und setze:
 | `backup_dir` | Lokales Backup-Verzeichnis |
 | `log_filename` | Log-Datei (Standard: `backup_dir/mysqlbackup.log`) |
 | `admin_email`, `admin_smtp_*` | E-Mail und SMTP für Fehlermeldungen. `admin_smtp_user`: optionaler Login (sonst = admin_email). `admin_smtp_tls`: `"tls"` (Port 465), `"starttls"` (Port 587), `""` = Auto |
-| `remote_backup_dir`, `remote_ssh_*` | Optionales SFTP-Remote-Backup |
-| `start_time` | Tägliche Startzeit (HH:MM, Standard 22:00) für den Zeitplan |
+| `remote_backup_dir`, `remote_ssh_*` | Optionales SFTP-Remote-Backup. |
+| `remote_ssh_host_key` | **Pflicht bei Remote.** Pfad zu known_hosts-Datei oder Inline-Key-Zeile(n). Mehrere Keys: mit doppeltem senkrechtem Strich trennen. Bei Mismatch zeigt das Log den Server-Key zum Eintragen. |
+| `start_time` | Tägliche Startzeit (HH:MM, 00:00–23:59, Standard 22:00) für den Zeitplan |
+
+**Config-Validierung (nur Warnungen):** Config-Datei max. 10 KiB. Ports
+(mysql_port, admin_smtp_port, remote_ssh_port) empfohlen 1–65535;
+retain_* 1–364; start_time HH:MM. Ungültige Werte werden dennoch verwendet,
+es erscheint eine Warnung im Log.
 
 Die Config-Datei wird gesucht in: `-config`-Pfad, dann aktuellem Verzeichnis
 (`config.json`), dann Benutzer-Home.
@@ -54,7 +64,7 @@ mysqlbackup
 mysqlbackup --status
 mysqlbackup --status -config /pfad/zur/config.json
 
-# Backup ausführen (wird von den Jobs übergeben; manuell erzeugte Dateien werden vom nächsten Nachtlauf überschrieben)
+# Backup ausführen (von Jobs genutzt; manuelle Läufe vom nächsten Nachtlauf überschrieben)
 mysqlbackup --backup
 mysqlbackup --backup -config /pfad/zur/config.json
 
@@ -78,6 +88,9 @@ mysqlbackup --remove
 
 # Config-Datei mit Klartextpasswörtern schreiben (z. B. Migration/Prüfung)
 mysqlbackup --cleanconfig
+
+# Backup-Datei(en) von Remote (Dateiname oder Wildcards, keine Pfadkomponenten)
+mysqlbackup --getfile "mysql_backup_*.zip"
 ```
 
 ## Wiederherstellung
@@ -106,6 +119,24 @@ mysql -u root -p < mydb.sql
 
 Die SQL enthält den DB-Dump und die User/Grants, die Rechte auf diese Datenbank
 haben (root nicht enthalten).
+
+## Sicherheit
+
+- **SSH/SFTP:** Host-Key-Prüfung ist Pflicht. `remote_ssh_host_key` auf
+  known_hosts-Datei oder Inline-Key-Zeile(n) setzen. Mehrere Keys (z. B.
+  ecdsa und ed25519) mit doppeltem senkrechtem Strich trennen, damit die
+  Verbindung unabhängig vom Key-Typ funktioniert. Bei Mismatch zeigt das
+  Log den vom Server gesendeten Key zum Eintragen.
+- **Passwörter:** MySQL-Passwort wird über die Umgebungsvariable
+  `MYSQL_PWD` übergeben (nicht in der Prozesszeile). Config unterstützt
+  sconfig-verschlüsselte Passwörter. Bei `-v`/`--verbose` werden in der
+  Schedule-Schicht geloggte Befehlszeilen ohne Passwort-Argumente ausgegeben.
+- **Config:** Maximale Config-Dateigröße 10 KiB. Validierungs-Warnungen für
+  Ports (1–65535), Retain (1–364) und Startzeit (00:00–23:59).
+- **Pfade:** Backup-Dateinamen bereinigen Datenbanknamen (kein Path-Traversal).
+  `--getfile` akzeptiert nur Basis-Dateinamen (kein `..` oder Pfadtrenner).
+- **Audit:** Vollständiger Sicherheitsaudit und GDPR-Hinweise in
+  `securityreport.md`.
 
 ## Anforderungen
 

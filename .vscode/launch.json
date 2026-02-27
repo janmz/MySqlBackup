@@ -21,6 +21,7 @@
 			"program": "${workspaceFolder}",
 			"args": [
 				"--backup",
+				"-verbose",
 				"-config",
 				"${workspaceFolder}/config.json"
 			]

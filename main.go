@@ -5,9 +5,10 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.3.1.79 (in version.go zu ändern)
+// Version: 1.3.2.84 (in version.go zu ändern)
 //
 // ChangeLog:
+// 27.02.26	1.3.2	Fixed: documentation, matching of ssh keys
 // 26.02.26	1.3.1	Fixed: remove critical logs and parametersand enforced ssh host key usage according to results of security audit
 // 26.02.26	1.3.0	Fixed: checking of existing windows tasks, Feature: Overview of backups by classes and calculating average backup time
 // 11.02.26	1.2.0	Feature: included an way to fully restore a database

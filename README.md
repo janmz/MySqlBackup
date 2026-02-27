@@ -24,6 +24,9 @@ error email notifications. Configured via [janmz/sconfig](https://github.com/jan
 - **Automatic schedule setup** on first run: Windows Task Scheduler or Linux
   systemd timer (no separate install step required).
 - Cross-platform: Windows and Linux (paths and scheduling adapt automatically).
+- If MySQL was auto-started for the backup, it is always stopped on exit (even on
+  error). When running as a debug binary (e.g. `__debug_bin.exe`), schedule init
+  does not create or update the Windows task (so the task is not overwritten).
 
 ## Configuration
 
@@ -41,8 +44,14 @@ Copy `config.example.json` to `config.json` and set:
 | `backup_dir` | Local backup directory |
 | `log_filename` | Log file path (default: `backup_dir/mysqlbackup.log`) |
 | `admin_email`, `admin_smtp_*` | Error notification email and SMTP. `admin_smtp_tls`: `"tls"` (port 465, implicit TLS), `"starttls"` (port 587), `""` = auto |
-| `remote_backup_dir`, `remote_ssh_*` | Optional SFTP remote backup |
-| `start_time` | Daily run time (HH:MM, default 22:00) for schedule |
+| `remote_backup_dir`, `remote_ssh_*` | Optional SFTP remote backup. |
+| `remote_ssh_host_key` | **Mandatory if using remote.** Path to known_hosts file or inline key line(s). Multiple keys: separate with double vertical bar. On mismatch the log shows the server key to add. |
+| `start_time` | Daily run time (HH:MM, 00:00–23:59, default 22:00) for schedule |
+
+**Config validation (warnings only):** Config file max 10 KiB. Ports
+(mysql_port, admin_smtp_port, remote_ssh_port) recommended 1–65535;
+retain_* 1–364; start_time HH:MM. Invalid values are still used but a
+warning is logged.
 
 Config file is looked up in: `-config` path, then current directory
 (`config.json`), then user home.
@@ -55,7 +64,7 @@ mysqlbackup
 mysqlbackup --status
 mysqlbackup --status -config /path/to/config.json
 
-# Run backup (used by scheduled jobs; manual runs are overwritten by the next nightly job)
+# Run backup (scheduled jobs; manual runs overwritten by next nightly job)
 mysqlbackup --backup
 mysqlbackup --backup -config /path/to/config.json
 
@@ -65,7 +74,7 @@ mysqlbackup --restore
 # Restore from latest backup day before a date
 mysqlbackup --restore 20250210
 
-# Full restore (stop mysql, data -> data.old, copy instance backup -> data, then import)
+# Full restore (stop mysql, data->data.old, copy instance backup->data, import)
 mysqlbackup --restorefull
 
 # Full restore from latest backup before a date
@@ -79,6 +88,9 @@ mysqlbackup --remove
 
 # Write config file with plaintext passwords (for migration/inspection)
 mysqlbackup --cleanconfig
+
+# Download backup file(s) from remote (filename or wildcards, no path components)
+mysqlbackup --getfile "mysql_backup_*.zip"
 ```
 
 ## Restore
@@ -107,6 +119,24 @@ mysql -u root -p < mydb.sql
 
 The SQL includes the database dump and the users/grants that have privileges on
 that database (root is not included).
+
+## Security
+
+- **SSH/SFTP:** Host key verification is required. Set `remote_ssh_host_key`
+  to a known_hosts file path or inline key line(s). Multiple keys (e.g.
+  ecdsa and ed25519) can be separated by double vertical bar so the
+  connection works regardless of which key type the server sends. On host
+  key mismatch the log prints the key the server sent so you can add it.
+- **Passwords:** MySQL password is passed via the `MYSQL_PWD` environment
+  variable (not on the process command line). Config supports sconfig-
+  encrypted passwords. With `-v`/`--verbose`, command lines logged by the
+  schedule layer have password arguments redacted.
+- **Config:** Max config file size 10 KiB. Validation warnings for ports
+  (1–65535), retain (1–364), and start_time (00:00–23:59).
+- **Paths:** Backup filenames sanitize database names (no path traversal).
+  `--getfile` accepts only base filenames (no `..` or path separators).
+- **Audit:** See `securityreport.md` for the full security audit and GDPR
+  notes.
 
 ## Requirements
 

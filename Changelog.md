@@ -2,6 +2,53 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.3.1.83] – 2025-02-10
+
+### Geändert
+
+- **Dokumentation:** README.md und README.de.md an aktuellen Stand angepasst:
+  Konfiguration (remote_ssh_host_key, Validierung), Abschnitt „Sicherheit“
+  (Host-Key, MYSQL_PWD, Log-Redaktion, Config-Validierung, Path-Traversal-Schutz,
+  Verweis auf securityreport.md), Verhalten (MySQL-Stop bei Fehler, Debug-Binary),
+  `--getfile`-Beispiel.
+
+---
+
+## [1.3.1.82] – 2026-02-26
+
+### Behoben
+
+- **SSH Host-Key (Inline):** Inline-Keys wurden fälschlich mit
+  `ParsePublicKey` (Binary-Wire-Format) geparst; für Textzeilen aus
+  known_hosts/authorized_keys wird nun `ParseAuthorizedKey` verwendet.
+
+---
+
+## [1.3.1.81] – 2026-02-26
+
+### Geändert
+
+- **Port-Validierung:** Gültiger Bereich für Ports (mysql_port, admin_smtp_port,
+  remote_ssh_port) ist jetzt 1–65535 (zuvor 1024–65535).
+- **SSH Host-Key (Inline):** Zeilenumbrüche in `remote_ssh_host_key` werden
+  vor dem Parsen normalisiert; bei Parse-Fehler (z. B. „short read“ bei
+  abgeschnittener Key-Zeile) erscheint ein Hinweis, volle Key-Zeile oder Pfad
+  zu known_hosts zu verwenden.
+
+---
+
+## [1.3.1.80] – 2026-02-26
+
+### Behoben
+
+- **Backup-Abbruch:** Wenn der Backup-Lauf mit Fehler endet (z. B. fehlender
+  `remote_ssh_host_key` bei Remote-Sync), wurde MySQL nicht gestoppt, falls es
+  zu Beginn per mysql_auto_start_stop gestartet wurde. Das Stoppen erfolgt jetzt
+  per defer, sodass MySQL bei jedem Rückweg aus dem Ablauf (Erfolg oder Fehler)
+  wieder heruntergefahren wird.
+
+---
+
 ## [1.3.0.78] – 2026-02-26
 
 ### Geändert (Sicherheit)

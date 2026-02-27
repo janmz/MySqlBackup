@@ -105,18 +105,18 @@ func Load(path string, cleanConfig bool) (*Config, error) {
 	return cfg, nil
 }
 
-// Validate returns warnings for config values outside recommended bounds (ports 1024–65535, retain 1–364, start_time 00:00–23:59).
+// Validate returns warnings for config values outside recommended bounds (ports 1–65535, retain 1–364, start_time 00:00–23:59).
 func Validate(cfg *Config) []string {
 	var w []string
-	// Ports: > 1023 and < 65536
-	if cfg.MySQLPort <= 1023 || cfg.MySQLPort >= 65536 {
-		w = append(w, i18n.Tf("config.warn.port_range", "mysql_port", cfg.MySQLPort, 1024, 65535))
+	// Ports: 1–65535
+	if cfg.MySQLPort < 1 || cfg.MySQLPort > 65535 {
+		w = append(w, i18n.Tf("config.warn.port_range", "mysql_port", cfg.MySQLPort, 1, 65535))
 	}
-	if cfg.AdminSMTPPort != 0 && (cfg.AdminSMTPPort <= 1023 || cfg.AdminSMTPPort >= 65536) {
-		w = append(w, i18n.Tf("config.warn.port_range", "admin_smtp_port", cfg.AdminSMTPPort, 1024, 65535))
+	if cfg.AdminSMTPPort != 0 && (cfg.AdminSMTPPort < 1 || cfg.AdminSMTPPort > 65535) {
+		w = append(w, i18n.Tf("config.warn.port_range", "admin_smtp_port", cfg.AdminSMTPPort, 1, 65535))
 	}
-	if cfg.RemoteSSHPort != 0 && (cfg.RemoteSSHPort <= 1023 || cfg.RemoteSSHPort >= 65536) {
-		w = append(w, i18n.Tf("config.warn.port_range", "remote_ssh_port", cfg.RemoteSSHPort, 1024, 65535))
+	if cfg.RemoteSSHPort != 0 && (cfg.RemoteSSHPort < 1 || cfg.RemoteSSHPort > 65535) {
+		w = append(w, i18n.Tf("config.warn.port_range", "remote_ssh_port", cfg.RemoteSSHPort, 1, 65535))
 	}
 	// Retain: > 0 and < 365
 	if cfg.RetainDaily <= 0 || cfg.RetainDaily >= 365 {

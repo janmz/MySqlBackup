@@ -4,12 +4,14 @@
 package remote
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,7 +65,7 @@ func Sync(cfg *config.Config, backupDir string, log interface {
 	if err != nil {
 		return fmt.Errorf(i18n.T("err.list_local"), err)
 	}
-	client, err := dial(cfg)
+	client, err := dial(cfg, log)
 	if err != nil {
 		return fmt.Errorf(i18n.T("err.ssh_dial"), err)
 	}
@@ -230,9 +232,28 @@ func streamEncryptUpload(src io.Reader, dst io.Writer, password string) error {
 	return err
 }
 
+// hostKeyLog can output a message when host key mismatch (for debug: show server key to add to config).
+type hostKeyLog interface {
+	Info(string, ...interface{})
+}
+
 // hostKeyCallback returns a HostKeyCallback from cfg.remote_ssh_host_key:
 // if the value is a path to a readable file, use it as known_hosts; otherwise treat as inline key.
-func hostKeyCallback(cfg *config.Config) (ssh.HostKeyCallback, error) {
+// When log is non-nil and the callback rejects (mismatch), the server's key is logged so it can be added to remote_ssh_host_key.
+func hostKeyCallback(cfg *config.Config, log hostKeyLog) (ssh.HostKeyCallback, error) {
+	wrapWithMismatchDebug := func(inner ssh.HostKeyCallback) ssh.HostKeyCallback {
+		if log == nil {
+			return inner
+		}
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			err := inner(hostname, remote, key)
+			if err != nil {
+				serverKeyLine := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+				log.Info(i18n.Tf("log.msg.ssh_server_key_on_mismatch", hostname, serverKeyLine))
+			}
+			return err
+		}
+	}
 	s := strings.TrimSpace(cfg.RemoteSSHHostKey)
 	if s == "" {
 		return nil, fmt.Errorf(i18n.T("err.ssh_host_key_required"))
@@ -243,23 +264,62 @@ func hostKeyCallback(cfg *config.Config) (ssh.HostKeyCallback, error) {
 		if err != nil {
 			return nil, fmt.Errorf(i18n.T("err.ssh_host_key_file"), err)
 		}
-		return cb, nil
+		return wrapWithMismatchDebug(cb), nil
 	}
-	// Not a readable file: treat as inline key "key-type base64..." or "hostname key-type base64..."
+	// Not a readable file: treat as inline key(s). Support multiple keys (split by newline or " || ")
+	// so that "host key mismatch" is avoided when the server sends a different key type (e.g. ed25519 vs rsa).
+	keyBlocks := strings.Split(s, "||")
+	var allowedKeys []ssh.PublicKey
+	for _, block := range keyBlocks {
+		block = strings.ReplaceAll(block, "\r\n", "\n")
+		block = strings.ReplaceAll(block, "\r", "\n")
+		for _, line := range strings.Split(block, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				continue
+			}
+			keyLine := strings.Join(parts[len(parts)-2:], " ")
+			pubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(keyLine))
+			if err != nil {
+				continue
+			}
+			allowedKeys = append(allowedKeys, pubKey)
+		}
+	}
+	if len(allowedKeys) > 0 {
+		cb := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			for _, allowed := range allowedKeys {
+				if bytes.Equal(key.Marshal(), allowed.Marshal()) {
+					return nil
+				}
+			}
+			return fmt.Errorf("host key mismatch")
+		}
+		return wrapWithMismatchDebug(cb), nil
+	}
+	// Single line (no newlines or parse failed per line): normalize and parse one key
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.TrimSpace(s)
 	parts := strings.Fields(s)
 	if len(parts) < 2 {
 		return nil, fmt.Errorf(i18n.T("err.ssh_host_key_invalid"))
 	}
 	keyLine := strings.Join(parts[len(parts)-2:], " ")
-	pubKey, err := ssh.ParsePublicKey([]byte(keyLine))
+	pubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(keyLine))
 	if err != nil {
-		return nil, fmt.Errorf(i18n.T("err.ssh_host_key_parse"), err)
+		return nil, fmt.Errorf("%w. %s", fmt.Errorf(i18n.T("err.ssh_host_key_parse"), err), i18n.T("err.ssh_host_key_parse_hint"))
 	}
-	return ssh.FixedHostKey(pubKey), nil
+	return wrapWithMismatchDebug(ssh.FixedHostKey(pubKey)), nil
 }
 
-func dial(cfg *config.Config) (*ssh.Client, error) {
-	hostKeyCB, err := hostKeyCallback(cfg)
+func dial(cfg *config.Config, log hostKeyLog) (*ssh.Client, error) {
+	hostKeyCB, err := hostKeyCallback(cfg, log)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +370,7 @@ func GetFile(cfg *config.Config, pattern, destDir string, log interface {
 	if !validGetfilePattern(pattern) {
 		return nil, fmt.Errorf(i18n.T("err.getfile_no_path"))
 	}
-	client, err := dial(cfg)
+	client, err := dial(cfg, log)
 	if err != nil {
 		return nil, fmt.Errorf(i18n.T("err.ssh_dial"), err)
 	}

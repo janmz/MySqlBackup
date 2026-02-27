@@ -2,6 +2,17 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.3.2.85] – 2026-02-27
+
+### Behoben
+
+- **Log-Ausgabe:** User-Liste („found N user(s): …“) enthielt bei Host-Wildcards
+  (z. B. `myplan@192.168.1.%`) ein `%`, das von `log.Info` als Format-Anweisung
+  gelesen wurde und zu `%!,(MISSING)` führte. Ausgabe erfolgt nun über `log.InfoS`,
+  damit die Meldung nicht als Format-String interpretiert wird.
+
+---
+
 ## [1.3.1.83] – 2025-02-10
 
 ### Geändert

@@ -56,7 +56,8 @@ func Run(cfg *config.Config, conn *mysql.Conn, userSQL []byte, dbs []string, isM
 	hostPart := hostnameForFile(cfg.HostnameForBackup())
 	dbToUserSQL, userNames := ParseUserSQL(userSQL, log.Warn)
 	if len(userNames) > 0 {
-		log.Info(i18n.Tf("log.msg.users_found", len(userNames), strings.Join(userNames, ", ")))
+		// Use InfoS so the message is not used as a format string; user names can contain '%' (e.g. host wildcards like 192.168.1.%).
+		log.InfoS(i18n.Tf("log.msg.users_found", len(userNames), strings.Join(userNames, ", ")))
 	}
 
 	for _, db := range dbs {

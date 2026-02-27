@@ -110,7 +110,7 @@ func (u *userRecord) setPassword(host, hash string) error {
 		return nil
 	}
 	if prev, ok := u.pwByHost[host]; ok && prev != hash {
-		return fmt.Errorf(i18n.Tf("err.user_differing_password", u.name, host))
+		return fmt.Errorf("%s", i18n.Tf("err.user_differing_password", u.name, host))
 	}
 	u.pwByHost[host] = hash
 	if u.password == "" {

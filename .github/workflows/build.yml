@@ -15,6 +15,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sshcommands (replace dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: janmz/sshcommands
+          ref: v1.0.1
+          path: sshcommands
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move sshcommands to parent for replace path
+        run: |
+          mv sshcommands ..
+        if: runner.os != 'Windows'
+      - name: Move sshcommands to parent for replace path (Windows)
+        run: Move-Item -Path sshcommands -Destination ..
+        if: runner.os == 'Windows'
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
@@ -26,6 +40,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sshcommands (replace dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: janmz/sshcommands
+          ref: v1.0.1
+          path: sshcommands
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move sshcommands to parent for replace path
+        run: mv sshcommands ..
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'

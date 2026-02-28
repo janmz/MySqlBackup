@@ -5,7 +5,7 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.3.6.92 (in version.go zu ändern)
+// Version: 1.3.6.93 (in version.go zu ändern)
 //
 // ChangeLog:
 // 27.02.26	1.3.6	Fixed: refactored the ssh handling to separate package!

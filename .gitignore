@@ -29,6 +29,10 @@ resources.syso
 
 # IDE / editor
 .idea/
+.cursor/
+.cursor
+/.cursor
+/.cursor/
 *.swp
 *.swo
 *~

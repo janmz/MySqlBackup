@@ -2,6 +2,18 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.3.6.93] – 2026-02-28
+
+### Geändert
+
+- **CI (GitHub Actions):** Workflow checkt das Replace-Modul
+  `github.com/janmz/sshcommands` (Ref `v1.0.1`) in das übergeordnete
+  Verzeichnis aus, damit `replace => ../sshcommands` in go.mod auch im
+  Laufzeitumfeld existiert. Behebt Fehler von golangci-lint („no export
+  data for github.com/janmz/sshcommands“) sowie Build/Test in CI.
+
+---
+
 ## [1.3.5.91] – 2026-02-27
 
 ### Hinzugefügt

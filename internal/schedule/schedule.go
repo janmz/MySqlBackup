@@ -553,10 +553,7 @@ func ensureUnix(cfg *config.Config, configPath string, log *logger.Logger) error
 func systemdUserAvailable(log *logger.Logger) bool {
 	cmd := exec.Command("systemctl", "--user", "list-timers", "--no-legend")
 	_, err := runWithDebug(log, cmd)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func ensureLinuxSystemd(cfg *config.Config, configPath string, log *logger.Logger) error {

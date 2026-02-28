@@ -29,7 +29,7 @@ type Logger interface {
 // RestoreFromZips imports SQL from each backup zip file in order.
 func RestoreFromZips(conn *mysql.Conn, files []retention.BackupFile, log Logger) error {
 	if len(files) == 0 {
-		return fmt.Errorf(i18n.T("err.restore_no_backups"))
+		return errors.New(i18n.T("err.restore_no_backups"))
 	}
 	for _, f := range files {
 		log.Info(i18n.Tf("log.msg.restore_zip", filepath.Base(f.Path)))
@@ -56,7 +56,7 @@ func restoreZip(conn *mysql.Conn, zipPath string) error {
 		}
 	}
 	if sqlFile == nil {
-		return fmt.Errorf(i18n.T("err.restore_sql_missing"), filepath.Base(zipPath))
+		return fmt.Errorf("%s: %s", i18n.T("err.restore_sql_missing"), filepath.Base(zipPath))
 	}
 
 	in, err := sqlFile.Open()
@@ -88,7 +88,7 @@ func restoreZip(conn *mysql.Conn, zipPath string) error {
 func FullReinit(cfg *config.Config, log Logger) error {
 	dataDir := strings.TrimSpace(cfg.MySQLDataDir)
 	if dataDir == "" {
-		return fmt.Errorf(i18n.T("err.restorefull_data_dir"))
+		return errors.New(i18n.T("err.restorefull_data_dir"))
 	}
 	backupDir := strings.TrimSpace(cfg.MySQLBackupDir)
 	if backupDir == "" {
@@ -102,48 +102,48 @@ func FullReinit(cfg *config.Config, log Logger) error {
 		if err == nil {
 			err = errors.New("not a directory")
 		}
-		return fmt.Errorf(i18n.T("err.restorefull_backup_dir"), err)
+		return fmt.Errorf("%s: %w", i18n.T("err.restorefull_backup_dir"), err)
 	}
 	if _, err := os.Stat(dataOldDir); err == nil {
-		return fmt.Errorf(i18n.T("err.restorefull_data_old_exists"), dataOldDir)
+		return fmt.Errorf("%s: %s", i18n.T("err.restorefull_data_old_exists"), dataOldDir)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf(i18n.T("err.restorefull_data_old_stat"), err)
+		return fmt.Errorf("%s: %w", i18n.T("err.restorefull_data_old_stat"), err)
 	}
 	if _, err := os.Stat(dataDir); err != nil {
-		return fmt.Errorf(i18n.T("err.restorefull_data_dir_missing"), err)
+		return fmt.Errorf("%s: %w", i18n.T("err.restorefull_data_dir_missing"), err)
 	}
 
 	if portReachable(cfg.MySQLHost, cfg.MySQLPort) {
 		if strings.TrimSpace(cfg.MySQLStopCmd) == "" {
-			return fmt.Errorf(i18n.T("err.restorefull_stop_required"))
+			return errors.New(i18n.T("err.restorefull_stop_required"))
 		}
 		log.Info(i18n.Tf("log.msg.mysql_stopping", cfg.MySQLStopCmd))
 		if err := runMySQLLifecycleCmd(cfg.MySQLStopCmd, log, true); err != nil {
-			return fmt.Errorf(i18n.T("err.restorefull_stop"), err)
+			return fmt.Errorf("%s: %w", i18n.T("err.restorefull_stop"), err)
 		}
 		if !waitForPortState(cfg.MySQLHost, cfg.MySQLPort, false, 30*time.Second, 1*time.Second) {
-			return fmt.Errorf(i18n.T("err.restorefull_stop_timeout"))
+			return errors.New(i18n.T("err.restorefull_stop_timeout"))
 		}
 	}
 
 	log.Info(i18n.Tf("log.msg.restorefull_rename", dataDir, dataOldDir))
 	if err := os.Rename(dataDir, dataOldDir); err != nil {
-		return fmt.Errorf(i18n.T("err.restorefull_rename"), err)
+		return fmt.Errorf("%s: %w", i18n.T("err.restorefull_rename"), err)
 	}
 	log.Info(i18n.Tf("log.msg.restorefull_copy", backupDir, dataDir))
 	if err := copyDir(backupDir, dataDir); err != nil {
-		return fmt.Errorf(i18n.T("err.restorefull_copy"), err)
+		return fmt.Errorf("%s: %w", i18n.T("err.restorefull_copy"), err)
 	}
 
 	if strings.TrimSpace(cfg.MySQLStartCmd) == "" {
-		return fmt.Errorf(i18n.T("err.restorefull_start_required"))
+		return errors.New(i18n.T("err.restorefull_start_required"))
 	}
 	log.Info(i18n.Tf("log.msg.mysql_starting", cfg.MySQLStartCmd))
 	if err := runMySQLLifecycleCmd(cfg.MySQLStartCmd, log, false); err != nil {
-		return fmt.Errorf(i18n.T("err.restorefull_start"), err)
+		return fmt.Errorf("%s: %w", i18n.T("err.restorefull_start"), err)
 	}
 	if !waitForPortState(cfg.MySQLHost, cfg.MySQLPort, true, 60*time.Second, 2*time.Second) {
-		return fmt.Errorf(i18n.T("err.restorefull_start_timeout"))
+		return errors.New(i18n.T("err.restorefull_start_timeout"))
 	}
 	return nil
 }
@@ -239,7 +239,7 @@ func runMySQLLifecycleCmd(command string, log Logger, waitForExit bool) error {
 			defer devNull.Close()
 		}
 		if err := c.Start(); err != nil {
-			return fmt.Errorf(i18n.T("err.start_cmd"), err)
+			return fmt.Errorf("%s: %w", i18n.T("err.start_cmd"), err)
 		}
 		_ = c.Process.Release()
 		log.Info(i18n.T("log.msg.mysql_start_background"))

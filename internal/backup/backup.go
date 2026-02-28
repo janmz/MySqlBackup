@@ -73,7 +73,7 @@ func Run(cfg *config.Config, conn *mysql.Conn, userSQL []byte, dbs []string, isM
 			return nil, fmt.Errorf(i18n.Tf("err.dump_db", db), err)
 		}
 		log.Info(i18n.Tf("log.msg.dumped_db", db))
-		userBlock, _ := dbToUserSQL[db]
+		userBlock := dbToUserSQL[db]
 		if userBlock != "" {
 			if _, err := io.WriteString(entryWriter, "\n\n"); err != nil {
 				cancel()

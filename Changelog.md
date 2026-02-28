@@ -6,6 +6,12 @@ Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
 ### Geändert
 
+- **Lint (gosimple/govet):** Überflüssige Blank-Zuweisung in
+  `internal/backup/backup.go` entfernt (S1005). In
+  `internal/schedule/schedule.go` vereinfacht: `return err == nil` (S1008).
+  In `internal/restore/restore.go` alle `fmt.Errorf(i18n.T(...))` durch
+  konstante Format-Strings (`%s`/`%w`) bzw. `errors.New` ersetzt (govet
+  printf).
 - **CI (GitHub Actions):** Workflow checkt das Replace-Modul
   `github.com/janmz/sshcommands` (Ref `v1.0.1`) in das übergeordnete
   Verzeichnis aus, damit `replace => ../sshcommands` in go.mod auch im

@@ -2,6 +2,30 @@
 
 Alle wesentlichen Änderungen am Projekt werden hier dokumentiert.
 
+## [1.3.8.96] – 2026-10-12
+
+### Behoben
+
+- **Windows-Aufgabe:** Die geplante Aufgabe startete das Programm über
+  `cmd.exe /c cd /d "<UNC-Pfad>" && …`. `cmd.exe` unterstützt keine
+  UNC-Pfade als aktuelles Verzeichnis, daher brach die Aufgabe mit
+  Ergebnis 1 ab, ohne dass ein Backup lief. Die Aufgabe startet
+  `mysqlbackup.exe` jetzt direkt (Argumente `--backup -config "…"`,
+  Arbeitsverzeichnis = Config-Verzeichnis). Bestehende `cmd.exe`-Aufgaben
+  werden beim nächsten `--status`/`--backup` automatisch neu angelegt.
+- Tests für `internal/schedule` hinzugefügt.
+
+---
+## [1.3.7.95] – 2026-10-12
+
+### Hinzugefügt
+
+- **Debug:** Launch-Konfiguration „Backup wie Aufgabenplanung (UNC-Pfade)“
+  in `.vscode/launch.json`, die `--backup` mit UNC-Config-Pfad und
+  UNC-Arbeitsverzeichnis wie die geplante Aufgabe startet.
+- `CLAUDE.md` und `.claude/` in `.gitignore` aufgenommen.
+
+---
 ## [1.3.6.93] – 2026-02-28
 
 ### Geändert

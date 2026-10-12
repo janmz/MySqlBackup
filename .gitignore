@@ -46,3 +46,8 @@ Thumbs.db
 
 # Workspace (optional – remove if you want to track it)
 # *.code-workspace
+
+# KI-Anweisungen
+CLAUDE.md
+AGENTS.md
+.claude/

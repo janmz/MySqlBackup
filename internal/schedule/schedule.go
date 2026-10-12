@@ -79,10 +79,11 @@ func runWithDebug(log *logger.Logger, cmd *exec.Cmd) ([]byte, error) {
 	return out, err
 }
 
-// getWindowsTaskRunStringFull returns the task's full run string (Execute + Arguments) via PowerShell, without truncation.
-// schtasks /FO LIST /V truncates long lines; PowerShell returns the full value.
+// getWindowsTaskRunStringFull returns the task's full run string ("Execute" Arguments) via PowerShell, without truncation.
+// schtasks /FO LIST /V truncates long lines; PowerShell returns the full value. Execute is quoted (unless already quoted) so
+// paths with spaces can be parsed by parseTaskRunToExeConfig.
 func getWindowsTaskRunStringFull(log *logger.Logger) (string, error) {
-	script := `$t = Get-ScheduledTask -TaskName '` + taskNameWindows + `' -ErrorAction SilentlyContinue; if ($t -and $t.Actions.Count -gt 0) { $a = $t.Actions[0]; $a.Execute + ' ' + $a.Arguments }`
+	script := `$t = Get-ScheduledTask -TaskName '` + taskNameWindows + `' -ErrorAction SilentlyContinue; if ($t -and $t.Actions.Count -gt 0) { $a = $t.Actions[0]; $e = $a.Execute; if (-not $e.StartsWith('"')) { $e = '"' + $e + '"' }; $e + ' ' + $a.Arguments }`
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	out, err := runWithDebug(log, cmd)
 	if err != nil {
@@ -286,6 +287,10 @@ func parseTaskRunToExeConfig(rest string) (exe, configPath string, ok bool) {
 // windowsTaskInfoMatches returns true if the parsed task matches desired hostname, exe/config paths, and start time.
 // Also checks Status (Enabled/Aktiviert), ScheduleType (Daily/Täglich), and Days (daily pattern).
 func windowsTaskInfoMatches(info windowsTaskInfo, hostname, exeTask, configPathTask, startTime string) bool {
+	// Tasks wrapped in cmd.exe (older versions) fail on UNC working directories and must be recreated.
+	if taskRunUsesCmd(info.TaskToRun) {
+		return false
+	}
 	taskExe, taskConfig, ok := parseTaskRunToExeConfig(info.TaskToRun)
 	if !ok || !windowsPathsMatch(exeTask, configPathTask, taskExe, taskConfig) {
 		return false
@@ -323,6 +328,14 @@ func windowsTaskInfoMatches(info windowsTaskInfo, hostname, exeTask, configPathT
 		return false
 	}
 	return true
+}
+
+// taskRunUsesCmd reports whether a task run string starts the program via cmd.exe (e.g. cmd.exe /c cd /d "dir" && ...).
+// cmd.exe cannot use UNC paths as current directory, so "cd /d \\server\share" fails and the backup never runs.
+func taskRunUsesCmd(run string) bool {
+	s := strings.ToLower(strings.TrimSpace(run))
+	s = strings.ReplaceAll(s, `"`, "")
+	return strings.HasPrefix(s, "cmd.exe ") || strings.HasPrefix(s, "cmd ")
 }
 
 // extractDoubleQuoted parses a double-quoted string at the start of s ("" inside is one "). Returns content, rest, ok.
@@ -448,13 +461,15 @@ func escapeForPSSingleQuoted(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
-// createWindowsTaskViaPowerShell creates the scheduled task via PowerShell so the exact command and WorkingDirectory are stored (no schtasks re-quoting).
-func createWindowsTaskViaPowerShell(taskName, cmdArgument, workingDir, startTime string, log *logger.Logger) error {
-	argEsc := escapeForPSSingleQuoted(cmdArgument)
+// createWindowsTaskViaPowerShell creates the scheduled task via PowerShell so the exact program, arguments and
+// WorkingDirectory are stored (no schtasks re-quoting). The program is started directly (no cmd.exe), so UNC paths work.
+func createWindowsTaskViaPowerShell(taskName, execute, arguments, workingDir, startTime string, log *logger.Logger) error {
+	exeEsc := escapeForPSSingleQuoted(execute)
+	argEsc := escapeForPSSingleQuoted(arguments)
 	wdEsc := escapeForPSSingleQuoted(workingDir)
-	// WorkingDirectory must be in quotes in the script when path has spaces; pass as single-quoted so it is stored literally including the path
-	script := `$arg = '` + argEsc + `'; $wd = '` + wdEsc + `'; ` +
-		`$a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $arg -WorkingDirectory $wd; ` +
+	// Values are passed single-quoted so they are stored literally, including spaces in paths
+	script := `$exe = '` + exeEsc + `'; $arg = '` + argEsc + `'; $wd = '` + wdEsc + `'; ` +
+		`$a = New-ScheduledTaskAction -Execute $exe -Argument $arg -WorkingDirectory $wd; ` +
 		`$t = New-ScheduledTaskTrigger -Daily -At '` + startTime + `'; ` +
 		`$s = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12); ` +
 		`Register-ScheduledTask -TaskName '` + taskName + `' -Action $a -Trigger $t -Settings $s -Force`
@@ -491,9 +506,9 @@ func ensureWindows(cfg *config.Config, configPath string, log *logger.Logger) er
 		startTime = "22:00"
 	}
 
-	// Build the exact command we store: "cmd.exe /c cd /d "workDir" && "exe" --backup -config "configPath"" (paths with " escaped as "")
-	pathForTR := func(s string) string { return strings.ReplaceAll(s, `"`, `""`) }
-	cmdArgument := fmt.Sprintf(`/c cd /d "%s" && "%s" --backup -config "%s"`, pathForTR(workDirTask), pathForTR(exeTask), pathForTR(configPathTask))
+	// The task starts exe directly with WorkingDirectory = workDir; no cmd.exe wrapper, because cmd.exe cannot
+	// "cd /d" into UNC paths (task would end with result 1 without running the backup).
+	taskArguments := fmt.Sprintf(`--backup -config "%s"`, configPathTask)
 
 	// If task exists, compare Hostname, Auszuführende Aufgabe (exe/config), Status, Zeitplantyp, Startzeit, Tage
 	cmd := exec.Command("schtasks", "/Query", "/TN", taskNameWindows, "/FO", "LIST", "/V")
@@ -521,7 +536,7 @@ func ensureWindows(cfg *config.Config, configPath string, log *logger.Logger) er
 	}
 
 	// Create via PowerShell so the exact Argument and WorkingDirectory are stored (no outer quotes, no backslash-escaping)
-	if err := createWindowsTaskViaPowerShell(taskNameWindows, cmdArgument, workDirTask, startTime, log); err != nil {
+	if err := createWindowsTaskViaPowerShell(taskNameWindows, exeTask, taskArguments, workDirTask, startTime, log); err != nil {
 		return fmt.Errorf("%s: %w", i18n.T("err.schtasks_create"), err)
 	}
 	log.InfoS(i18n.Tf("log.msg.windows_task_created", taskNameWindows, startTime))

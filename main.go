@@ -5,9 +5,13 @@ package main
 //
 // Donationware für CFI Kinderhilfe. Lizenz: MIT mit Namensnennung.
 //
-// Version: 1.3.7.94 (in version.go zu ändern)
+// Version: 1.3.11.99 (in version.go zu ändern)
 //
 // ChangeLog:
+// 12.10.26	1.3.11	Fix: Removed cd to UNC-Path from action parameter
+// 12.10.26	1.3.10	Fix: Removed cd to UNC-Path from action parameter
+// 12.10.26	1.3.9	Fix: Removed cd to UNC-Path from action parameter
+// 12.10.26	1.3.8	Fixed: Windows task starts exe directly (cmd.exe cannot cd into UNC paths, backup never ran)
 // 28.02.26	1.3.7	Fixed: some linter warnings
 // 27.02.26	1.3.6	Fixed: refactored the ssh handling to separate package!
 // 26.02.26	1.3.1	Fixed: remove critical logs and parametersand enforced ssh host key usage according to results of security audit
